@@ -1150,6 +1150,97 @@ describe('createSupabaseCollections', () => {
     })
   })
 
+  describe('operations config', () => {
+    it('defaults to all operations when not specified', async () => {
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        tables: { users: { keyColumn: 'id' } },
+      })
+
+      const collection = db.tables.users
+
+      // Insert should work
+      collection.insert({ id: 10, username: 'test', status: 'ONLINE', created_at: '2024-01-01' })
+      await vi.waitFor(() => {
+        expect(supabase._spies.insertSpy).toHaveBeenCalled()
+      })
+    })
+
+    it('only registers insert handler when operations is ["insert"]', async () => {
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        tables: {
+          users: { keyColumn: 'id', operations: ['insert'] },
+        },
+      })
+
+      const collection = db.tables.users
+
+      // Insert should work
+      collection.insert({ id: 10, username: 'test', status: 'ONLINE', created_at: '2024-01-01' })
+      await vi.waitFor(() => {
+        expect(supabase._spies.insertSpy).toHaveBeenCalled()
+      })
+    })
+
+    it('does not call supabase delete when operations excludes delete', async () => {
+      supabase._spies.selectSpy.mockResolvedValue({
+        data: [{ id: 1, username: 'alice', status: 'ONLINE', created_at: '2024-01-01' }],
+        error: null,
+      })
+
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        tables: {
+          users: { keyColumn: 'id', operations: ['insert', 'update'] },
+        },
+      })
+
+      const collection = db.tables.users
+      await collection.utils.refetch()
+
+      try { collection.delete(1) } catch { /* no handler */ }
+
+      await new Promise((r) => setTimeout(r, 50))
+      expect(supabase._spies.deleteSpy).not.toHaveBeenCalled()
+    })
+
+    it('does not call supabase update when operations excludes update', async () => {
+      supabase._spies.selectSpy.mockResolvedValue({
+        data: [{ id: 1, username: 'alice', status: 'ONLINE', created_at: '2024-01-01' }],
+        error: null,
+      })
+
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        tables: {
+          users: { keyColumn: 'id', operations: ['insert', 'delete'] },
+        },
+      })
+
+      const collection = db.tables.users
+      await collection.utils.refetch()
+
+      try {
+        collection.update(1, (draft: any) => { draft.username = 'changed' })
+      } catch { /* no handler */ }
+
+      await new Promise((r) => setTimeout(r, 50))
+      expect(supabase._spies.updateSpy).not.toHaveBeenCalled()
+    })
+
+    it('creates a read-only table when operations is empty array', async () => {
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        tables: {
+          users: { keyColumn: 'id', operations: [] },
+        },
+      })
+
+      const collection = db.tables.users
+
+      try { collection.insert({ id: 1, username: 'x', status: 'ONLINE', created_at: '' }) } catch {}
+
+      await new Promise((r) => setTimeout(r, 50))
+      expect(supabase._spies.insertSpy).not.toHaveBeenCalled()
+    })
+  })
+
   describe('view mutation rejection', () => {
     it('does not call supabase on view insert', async () => {
       const db = createSupabaseCollections<Database>(supabase, queryClient, {

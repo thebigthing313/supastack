@@ -61,8 +61,12 @@ interface BaseCollectionConfig<TRow extends Record<string, unknown>> extends Que
   inArrayChunkSize?: number
 }
 
+type CrudOperation = 'insert' | 'update' | 'delete'
+
 export interface TableConfig<TRow extends Record<string, unknown>> extends BaseCollectionConfig<TRow> {
   schemas?: TableSchemas
+  /** Which mutation operations to enable. Defaults to all: ['insert', 'update', 'delete']. */
+  operations?: CrudOperation[]
 }
 
 export interface ViewConfig<TRow extends Record<string, unknown>> extends BaseCollectionConfig<TRow> {
@@ -174,16 +178,21 @@ async function withRefetch(col: any, fn: () => Promise<void>): Promise<void> {
   }
 }
 
+const ALL_OPERATIONS: CrudOperation[] = ['insert', 'update', 'delete']
+
 function buildMutationHandlers(
   tableName: string,
   keyColumn: string,
   schemas: TableSchemas | undefined,
   supabase: any,
+  operations: CrudOperation[] = ALL_OPERATIONS,
 ): Record<string, any> {
+  const ops = new Set(operations)
   const table = () => supabase.from(tableName)
+  const handlers: Record<string, any> = {}
 
-  return {
-    onInsert: async ({ transaction, collection: col }: any) => {
+  if (ops.has('insert')) {
+    handlers.onInsert = async ({ transaction, collection: col }: any) => {
       await withRefetch(col, async () => {
         const items = []
         for (const mutation of transaction.mutations) {
@@ -197,8 +206,11 @@ function buildMutationHandlers(
         const { error } = await table().insert(payload)
         if (error) throw error
       })
-    },
-    onUpdate: async ({ transaction, collection: col }: any) => {
+    }
+  }
+
+  if (ops.has('update')) {
+    handlers.onUpdate = async ({ transaction, collection: col }: any) => {
       await withRefetch(col, async () => {
         for (const mutation of transaction.mutations) {
           const { key, changes } = mutation
@@ -210,15 +222,20 @@ function buildMutationHandlers(
           if (error) throw error
         }
       })
-    },
-    onDelete: async ({ transaction, collection: col }: any) => {
+    }
+  }
+
+  if (ops.has('delete')) {
+    handlers.onDelete = async ({ transaction, collection: col }: any) => {
       await withRefetch(col, async () => {
         const keys = transaction.mutations.map((m: any) => m.key)
         const { error } = await table().delete().in(keyColumn, keys)
         if (error) throw error
       })
-    },
+    }
   }
+
+  return handlers
 }
 
 function createCachedProxy(
@@ -255,7 +272,7 @@ export function createSupabaseCollections<DB>(
     config.tables as any,
     (name, tableConfig) => {
       const opts = buildBaseCollectionOptions(name, tableConfig, supabase, queryClient)
-      Object.assign(opts, buildMutationHandlers(name, tableConfig.keyColumn, tableConfig.schemas, supabase))
+      Object.assign(opts, buildMutationHandlers(name, tableConfig.keyColumn, tableConfig.schemas, supabase, tableConfig.operations))
       if (tableConfig.schemas?.row) opts.schema = tableConfig.schemas.row
       return createCollection(queryCollectionOptions(opts as any))
     },

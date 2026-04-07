@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm test:*)",
+      "Bash(node -e ':*)",
+      "Bash(pnpm remove:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm --dir /c/Users/avnjm/Desktop/supabase-sync-demo exec tsc --noEmit)",
+      "Bash(pnpm --dir /c/Users/avnjm/Desktop/supabase-sync-demo build)",
+      "Bash(pnpm exec:*)",
+      "Bash(supabase init:*)",
+      "Bash(supabase start:*)",
+      "Bash(supabase status:*)",
+      "Bash(pnpm pack:*)",
+      "Bash(git init:*)",
+      "Bash(gh auth:*)",
+      "Bash(gh repo:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)"
+    ]
+  }
+}

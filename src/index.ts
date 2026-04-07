@@ -57,6 +57,14 @@ export interface QueryOptions {
 interface BaseCollectionConfig<TRow extends Record<string, unknown>> extends QueryOptions {
   keyColumn: keyof TRow & string
   syncMode?: 'eager' | 'on-demand'
+  /** Whether to start syncing immediately on creation. Defaults to true. Set false for auth-gated collections. */
+  startSync?: boolean
+  /** Column selection passed to Supabase's .select(). Defaults to '*'. */
+  select?: string
+  /** Automatic index creation for where expressions. */
+  autoIndex?: 'off' | 'eager'
+  /** Index constructor to use when autoIndex is 'eager'. Required when autoIndex is 'eager'. */
+  defaultIndexType?: any
   pageSize?: number
   inArrayChunkSize?: number
 }
@@ -84,6 +92,11 @@ type ViewConfigs<DB> = {
 export interface SupabaseCollectionsConfig<DB> {
   tables?: TableConfigs<DB>
   views?: ViewConfigs<DB>
+  /**
+   * Optional hook to wrap collection options before `createCollection`.
+   * Use this to add persistence (e.g., `persistedCollectionOptions` from @tanstack/db-sqlite-persistence-core).
+   */
+  wrapOptions?: (options: any) => any
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +161,7 @@ function buildBaseCollectionOptions(
   supabase: SupabaseClientLike,
   queryClient: QueryClient,
 ): Record<string, any> {
-  const { keyColumn, syncMode = 'eager' } = config
+  const { keyColumn, syncMode = 'eager', startSync = true, select = '*', autoIndex, defaultIndexType } = config
 
   return {
     id: `supabase-sync:${name}`,
@@ -158,14 +171,17 @@ function buildBaseCollectionOptions(
         supabase,
         tableName: name,
         syncMode,
+        select,
         loadSubsetOptions: context.meta?.loadSubsetOptions,
         ...pickDefined(config, ['pageSize', 'inArrayChunkSize']),
       })
     },
     queryClient,
     syncMode,
-    startSync: true,
+    startSync,
     getKey: (row: any) => row[keyColumn],
+    ...(autoIndex !== undefined && { autoIndex }),
+    ...(defaultIndexType !== undefined && { defaultIndexType }),
     ...pickDefined(config, QUERY_OPTION_KEYS),
   }
 }
@@ -267,6 +283,13 @@ export function createSupabaseCollections<DB>(
   queryClient: QueryClient,
   config: SupabaseCollectionsConfig<DB>,
 ): SupabaseCollectionsResult<DB> {
+  const { wrapOptions } = config
+
+  const finalizeCollection = (opts: any) => {
+    const collectionOpts = queryCollectionOptions(opts as any)
+    return createCollection(wrapOptions ? wrapOptions(collectionOpts) : collectionOpts)
+  }
+
   const tables = createCachedProxy(
     new Map(),
     config.tables as any,
@@ -274,7 +297,7 @@ export function createSupabaseCollections<DB>(
       const opts = buildBaseCollectionOptions(name, tableConfig, supabase, queryClient)
       Object.assign(opts, buildMutationHandlers(name, tableConfig.keyColumn, tableConfig.schemas, supabase, tableConfig.operations))
       if (tableConfig.schemas?.row) opts.schema = tableConfig.schemas.row
-      return createCollection(queryCollectionOptions(opts as any))
+      return finalizeCollection(opts)
     },
   )
 
@@ -284,7 +307,7 @@ export function createSupabaseCollections<DB>(
     (name, viewConfig) => {
       const opts = buildBaseCollectionOptions(name, viewConfig, supabase, queryClient)
       if (viewConfig.schemas?.row) opts.schema = viewConfig.schemas.row
-      return createCollection(queryCollectionOptions(opts as any))
+      return finalizeCollection(opts)
     },
   )
 

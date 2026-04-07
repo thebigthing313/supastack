@@ -10,6 +10,8 @@ export interface FetchTableDataOptions {
   supabase: any
   tableName: string
   syncMode: 'eager' | 'on-demand'
+  /** Column selection passed to Supabase's .select(). Defaults to '*'. */
+  select?: string
   loadSubsetOptions?: LoadSubsetOptions
   pageSize?: number
   inArrayChunkSize?: number
@@ -29,9 +31,10 @@ function chunk<T>(arr: T[], size: number): T[][] {
 async function fetchSingleQuery(
   supabase: any,
   tableName: string,
+  selectColumns: string,
   loadSubsetOptions: LoadSubsetOptions,
 ): Promise<any[]> {
-  let query = supabase.from(tableName).select('*')
+  let query = supabase.from(tableName).select(selectColumns)
   query = applyLoadSubsetOptions(query, loadSubsetOptions)
   const { data, error } = await query
   if (error) throw error
@@ -45,6 +48,7 @@ async function fetchSingleQuery(
 async function fetchAllPages(
   supabase: any,
   tableName: string,
+  selectColumns: string,
   loadSubsetOptions: LoadSubsetOptions,
   pageSize: number,
 ): Promise<any[]> {
@@ -54,7 +58,7 @@ async function fetchAllPages(
   const hasOptions = loadSubsetOptions.where || loadSubsetOptions.orderBy || loadSubsetOptions.cursor || loadSubsetOptions.limit != null || loadSubsetOptions.offset != null
 
   while (true) {
-    let query = supabase.from(tableName).select('*')
+    let query = supabase.from(tableName).select(selectColumns)
     if (hasOptions) query = applyLoadSubsetOptions(query, loadSubsetOptions)
     query = query.range(offset, offset + pageSize - 1)
 
@@ -76,6 +80,7 @@ export async function fetchTableData(options: FetchTableDataOptions): Promise<an
     supabase,
     tableName,
     syncMode,
+    select: selectColumns = '*',
     loadSubsetOptions,
     pageSize = DEFAULT_PAGE_SIZE,
     inArrayChunkSize = DEFAULT_IN_ARRAY_CHUNK_SIZE,
@@ -104,7 +109,7 @@ export async function fetchTableData(options: FetchTableDataOptions): Promise<an
             inExpr.field,
             itemChunk,
           )
-          return fetchSingleQuery(supabase, tableName, { ...loadSubsetOptions, where: chunkedWhere })
+          return fetchSingleQuery(supabase, tableName, selectColumns, { ...loadSubsetOptions, where: chunkedWhere })
         }),
       )
       return results.flat()
@@ -112,12 +117,12 @@ export async function fetchTableData(options: FetchTableDataOptions): Promise<an
 
     // If the caller specifies limit/offset, do a single fetch (no auto-pagination).
     if (loadSubsetOptions.limit != null || loadSubsetOptions.offset != null) {
-      return fetchSingleQuery(supabase, tableName, loadSubsetOptions)
+      return fetchSingleQuery(supabase, tableName, selectColumns, loadSubsetOptions)
     }
 
-    return fetchAllPages(supabase, tableName, loadSubsetOptions, pageSize)
+    return fetchAllPages(supabase, tableName, selectColumns, loadSubsetOptions, pageSize)
   }
 
   // Eager mode: fetch all rows with auto-pagination
-  return fetchAllPages(supabase, tableName, EMPTY_LOAD_SUBSET_OPTIONS, pageSize)
+  return fetchAllPages(supabase, tableName, selectColumns, EMPTY_LOAD_SUBSET_OPTIONS, pageSize)
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { QueryClient } from '@tanstack/query-core'
 import { z } from 'zod'
-import { eq, and, inArray, IR } from '@tanstack/db'
+import { eq, and, inArray, IR, BasicIndex } from '@tanstack/db'
 import { createSupabaseCollections, fetchTableData } from './index'
 import type { Database } from './test-utils/database.types'
 
@@ -198,6 +198,55 @@ describe('createSupabaseCollections', () => {
 
       expect(db.tables.users).toBeDefined()
       expect(db.views.active_users).toBeDefined()
+    })
+
+    it('accepts startSync, select, and autoIndex', () => {
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        tables: {
+          users: {
+            keyColumn: 'id',
+            startSync: false,
+            select: 'id,username,status',
+            autoIndex: 'eager',
+            defaultIndexType: BasicIndex,
+          },
+        },
+      })
+
+      // startSync: false means no initial fetch — collection exists but is idle
+      expect(db.tables.users).toBeDefined()
+      // Verify no fetch was triggered (startSync: false)
+      expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    it('uses custom select columns in fetch', async () => {
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        tables: {
+          users: {
+            keyColumn: 'id',
+            select: 'id,username',
+          },
+        },
+      })
+
+      await db.tables.users.utils.refetch()
+
+      expect(supabase._spies.selectSpy).toHaveBeenCalledWith('id,username')
+    })
+
+    it('accepts wrapOptions hook', () => {
+      const wrapSpy = vi.fn((opts: any) => opts)
+
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        wrapOptions: wrapSpy,
+        tables: {
+          users: { keyColumn: 'id' },
+        },
+      })
+
+      // Accessing the collection triggers creation, which calls wrapOptions
+      db.tables.users
+      expect(wrapSpy).toHaveBeenCalledTimes(1)
     })
 
     it('accepts staleTime, refetchInterval, enabled, retry, retryDelay, gcTime', () => {

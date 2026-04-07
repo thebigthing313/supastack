@@ -18,6 +18,12 @@ npm install supabase-sync
 pnpm add supabase-sync
 ```
 
+Or install directly from GitHub (useful before the package is published to npm):
+
+```bash
+pnpm add git+https://github.com/thebigthing313/supabase-sync.git
+```
+
 ### Peer dependencies
 
 You bring these — supabase-sync uses your copies so there's a single shared instance:

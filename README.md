@@ -8,7 +8,7 @@ Feed your Supabase-generated `Database` type to `createSupabaseCollections` and 
 - **Views** — read-only collections
 - **RPC** — query options factories for `useQuery` / `useSuspenseQuery`
 
-All fully typed from your `database.types.ts`.
+All fully typed end-to-end from your `database.types.ts`.
 
 ## Install
 
@@ -18,15 +18,7 @@ npm install supabase-sync
 pnpm add supabase-sync
 ```
 
-Or install directly from GitHub (useful before the package is published to npm):
-
-```bash
-pnpm add git+https://github.com/thebigthing313/supabase-sync.git
-```
-
 ### Peer dependencies
-
-You bring these — supabase-sync uses your copies so there's a single shared instance:
 
 ```bash
 pnpm add @supabase/supabase-js @tanstack/db @tanstack/query-core @tanstack/query-db-collection
@@ -114,30 +106,31 @@ function SearchResults({ query }: { query: string }) {
 ### Table config
 
 ```ts
-{
+createSupabaseCollections<Database>(supabase, queryClient, {
   tables: {
     todos: {
-      // Required: column used as the collection key and for .eq() filters
+      // Required: column used as the collection key
       keyColumn: 'id',
 
-      // Optional: 'eager' (default) loads all rows, 'on-demand' uses predicate pushdown
+      // Sync mode: 'eager' (default) loads all rows upfront,
+      // 'on-demand' fetches only rows matching the current query
       syncMode: 'eager',
 
-      // Optional: start syncing immediately (default: true). Set false for auth-gated collections.
+      // Delay initial sync (e.g., until the user is authenticated)
       startSync: true,
 
-      // Optional: column selection passed to Supabase's .select(). Defaults to '*'.
+      // Column selection passed to Supabase's .select()
       select: 'id, title, completed',
 
-      // Optional: which mutation operations to enable. Defaults to all three.
-      // Use operations: [] for read-only table collections.
+      // Which mutation operations to enable (default: all three)
+      // Use [] for read-only table collections
       operations: ['insert', 'update', 'delete'],
 
-      // Optional: automatic index creation for where expressions
+      // Automatic index creation for where expressions
       autoIndex: 'eager',         // 'off' (default) or 'eager'
-      defaultIndexType: BasicIndex, // required when autoIndex is 'eager'
+      defaultIndexType: BasicIndex,
 
-      // Optional: TanStack Query options
+      // TanStack Query options
       staleTime: 30_000,
       refetchInterval: 60_000,
       enabled: true,
@@ -145,28 +138,24 @@ function SearchResults({ query }: { query: string }) {
       retryDelay: 1000,
       gcTime: 300_000,
 
-      // Optional: pagination tuning
-      pageSize: 1000,          // rows per page for auto-pagination (default: 1000)
-      inArrayChunkSize: 200,   // max items per IN() clause before chunking (default: 200)
+      // Pagination tuning
+      pageSize: 1000,          // rows per page for auto-pagination
+      inArrayChunkSize: 200,   // max items per IN() before chunking
 
-      // Optional: Zod / Standard Schema for data transformation
+      // Schema validation/transformation (Zod, Valibot, ArkType, etc.)
       schemas: {
-        row: todoRowSchema,       // transform fetched rows (e.g., string → Date)
-        insert: todoInsertSchema, // validate/transform before insert
-        update: todoUpdateSchema, // validate/transform before update (receives partial)
+        row: todoRowSchema,       // transform fetched rows
+        insert: todoInsertSchema, // validate before insert
+        update: todoUpdateSchema, // validate before update (receives partial)
       },
     },
   },
-
-  // Optional: hook to wrap collection options before createCollection.
-  // Use for persistence (e.g., persistedCollectionOptions from @tanstack/db-sqlite-persistence-core).
-  wrapOptions: (options) => persistedCollectionOptions(options),
-}
+})
 ```
 
 ### View config
 
-Same as table config but without `insert`/`update` schemas. Views are read-only — no mutation handlers are registered.
+Same as table config but without `insert`/`update` schemas or `operations`. Views are read-only.
 
 ```ts
 {
@@ -174,17 +163,47 @@ Same as table config but without `insert`/`update` schemas. Views are read-only 
     active_users: {
       keyColumn: 'id',
       staleTime: 60_000,
-      schemas: {
-        row: activeUserSchema, // transform fetched rows
-      },
+      schemas: { row: activeUserSchema },
     },
   },
 }
 ```
 
+### RPC config
+
+Per-function schemas and query options for RPC calls:
+
+```ts
+{
+  rpcs: {
+    search_todos: {
+      schemas: {
+        args: searchArgsSchema,     // validate args before the network call
+        returns: searchResultSchema, // validate/transform the response
+      },
+      staleTime: 10_000,
+      retry: 3,
+      gcTime: 60_000,
+    },
+  },
+}
+```
+
+RPCs without a config entry work exactly the same — zero-config by default, opt-in depth when you need it.
+
+### `wrapOptions`
+
+Hook to wrap collection options before `createCollection`. Use for persistence:
+
+```ts
+{
+  wrapOptions: (options) => persistedCollectionOptions(options),
+}
+```
+
 ## Schema transforms
 
-Supabase returns date/time columns as strings. Use a Zod schema to transform them:
+Supabase returns date/time columns as strings. Use a schema to transform them:
 
 ```ts
 import { z } from 'zod'
@@ -193,7 +212,6 @@ const todoRowSchema = z.object({
   id: z.string(),
   title: z.string(),
   completed: z.boolean(),
-  user_id: z.string(),
   created_at: z.string().transform((s) => new Date(s)),
 })
 
@@ -205,22 +223,20 @@ const db = createSupabaseCollections<Database>(supabase, queryClient, {
     },
   },
 })
+// db.tables.todos now has created_at: Date instead of string
 ```
 
-When a `schemas.row` is provided, the collection's TypeScript type reflects the schema's output type (e.g., `created_at: Date` instead of `string`).
-
-Any schema library implementing the [Standard Schema](https://github.com/standard-schema/standard-schema) protocol works (Zod, Valibot, ArkType, etc.).
+Any library implementing the [Standard Schema](https://github.com/standard-schema/standard-schema) protocol works (Zod, Valibot, ArkType, etc.).
 
 ### Preserving types with `defineConfig`
 
-TypeScript widens schema types when config is stored in a variable. Use `defineConfig` to preserve literal types through variable assignment:
+TypeScript widens schema types when config is stored in a variable. Use `defineConfig` to preserve literal types:
 
 ```ts
 import { createSupabaseCollections, defineConfig } from 'supabase-sync'
 
 const define = defineConfig<Database>()
 
-// Schema types are preserved — db.tables.todos has created_at: Date, not string
 export const config = define({
   tables: {
     todos: {
@@ -230,22 +246,18 @@ export const config = define({
   },
 })
 
+// Schema output types are preserved
 const db = createSupabaseCollections<Database>(supabase, queryClient, config)
 ```
 
-This follows the same pattern as Vite's `defineConfig`. Without it, storing config in a separate variable loses the specific schema types and the collection falls back to the raw database row type.
-
 ## On-demand collections
 
-For large tables, use `syncMode: 'on-demand'` to fetch only the rows that match the current query's filters. TanStack DB pushes predicates down to the collection, and supabase-sync translates them to PostgREST filters.
+For large tables, use `syncMode: 'on-demand'` to fetch only rows matching the current query. TanStack DB pushes predicates down and supabase-sync translates them to PostgREST filters.
 
 ```ts
 const db = createSupabaseCollections<Database>(supabase, queryClient, {
   tables: {
-    logs: {
-      keyColumn: 'id',
-      syncMode: 'on-demand',
-    },
+    logs: { keyColumn: 'id', syncMode: 'on-demand' },
   },
 })
 ```
@@ -270,19 +282,19 @@ const db = createSupabaseCollections<Database>(supabase, queryClient, {
 Multi-segment field paths are automatically converted to PostgREST arrow notation:
 
 ```ts
-// data.address.city → data->address->>city
+// data.address.city  ->  data->address->>city
 .where(({ row }) => eq(row.data.address.city, 'NYC'))
 ```
 
 ### Safeguards
 
-- **Predicateless guard**: on-demand collections throw if queried without a `where`, `limit`, or cursor — prevents accidentally fetching the entire table.
-- **Auto-pagination**: both eager and on-demand modes paginate via `.range()` to avoid Supabase's default 1000-row limit.
-- **IN() chunking**: large `inArray` filters are split into parallel HTTP requests (default chunk size: 200) to avoid URL length limits.
+- **Predicateless guard** — on-demand collections throw if queried without a `where`, `limit`, or cursor to prevent accidentally fetching the entire table.
+- **Auto-pagination** — both eager and on-demand modes paginate via `.range()` to avoid Supabase's default 1,000-row limit.
+- **IN() chunking** — large `inArray` filters are split into parallel HTTP requests (default chunk size: 200) to avoid URL length limits.
 
 ## RPC
 
-`db.rpc` returns query options objects — not hooks. Pass them to `useQuery`, `useSuspenseQuery`, or call `queryFn` directly:
+`db.rpc` returns query options objects. Pass them to `useQuery`, `useSuspenseQuery`, or call `queryFn` directly:
 
 ```ts
 // With useQuery
@@ -292,8 +304,10 @@ const { data } = useQuery(db.rpc.search_todos({ query: 'hello' }))
 const { data } = useQuery({
   ...db.rpc.search_todos({ query }),
   enabled: query.length > 0,
-  staleTime: 10_000,
 })
+
+// Per-call overrides (when rpcs config is set)
+const opts = db.rpc.search_todos({ query }, { staleTime: 5_000 })
 
 // No-arg functions
 const { data: time } = useQuery(db.rpc.get_server_time())
@@ -302,16 +316,35 @@ const { data: time } = useQuery(db.rpc.get_server_time())
 const result = await db.rpc.search_todos({ query: 'hello' }).queryFn()
 ```
 
-## Exports
+## Advanced exports
+
+For building custom integrations on top of supabase-sync:
 
 ```ts
 import {
-  createSupabaseCollections, // main factory
-  defineConfig,              // config helper that preserves schema types
-  applyLoadSubsetOptions,    // expression mapper (for advanced use)
-  fetchTableData,            // data fetcher (for advanced use)
-} from 'supabase-sync'
+  // Main API
+  createSupabaseCollections,
+  defineConfig,
 
+  // Query pipeline — build custom queryFn or fetch directly
+  createQueryFn,
+  executeQuery,
+
+  // Mutation handlers — build custom mutation logic
+  createMutationHandlers,
+
+  // RPC proxy — build a standalone RPC layer
+  createRpcProxy,
+
+  // Expression translation — apply TanStack DB filters to Supabase queries
+  applyLoadSubsetOptions,
+
+  // Legacy (use executeQuery instead)
+  fetchTableData,
+} from 'supabase-sync'
+```
+
+```ts
 // Types
 import type {
   TableConfig,
@@ -320,9 +353,12 @@ import type {
   QueryOptions,
   SupabaseCollectionsConfig,
   RpcQueryOptions,
+  RpcConfig,
+  MutationHandlerConfig,
+  MutationHandlers,
 } from 'supabase-sync'
 ```
 
 ## License
 
-MIT
+[MIT](LICENSE.md)

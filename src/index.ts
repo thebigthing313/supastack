@@ -10,9 +10,17 @@ interface SupabaseClientLike {
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Collection } from '@tanstack/db'
 import type { QueryCollectionUtils } from '@tanstack/query-db-collection'
-import { fetchTableData } from './fetch-table-data.ts'
+import { createQueryFn } from './query-pipeline.ts'
+import { createMutationHandlers } from './mutation-handlers.ts'
+import { createRpcProxy } from './rpc-proxy.ts'
+import type { RpcConfig } from './rpc-proxy.ts'
 export { applyLoadSubsetOptions } from './apply-load-subset-options.ts'
 export { fetchTableData } from './fetch-table-data.ts'
+export { createQueryFn, executeQuery } from './query-pipeline.ts'
+export { createMutationHandlers } from './mutation-handlers.ts'
+export type { MutationHandlerConfig, MutationHandlers } from './mutation-handlers.ts'
+export { createRpcProxy } from './rpc-proxy.ts'
+export type { RpcConfig } from './rpc-proxy.ts'
 
 // ---------------------------------------------------------------------------
 // Type-level utilities for extracting table/view/function info from Database
@@ -89,9 +97,14 @@ type ViewConfigs<DB> = {
   [K in keyof ViewsOf<DB>]?: ViewConfig<RowOf<ViewsOf<DB>[K]> & Record<string, unknown>>
 }
 
+type RpcConfigs<DB> = {
+  [K in keyof FunctionsOf<DB>]?: RpcConfig
+}
+
 export interface SupabaseCollectionsConfig<DB> {
   tables?: TableConfigs<DB>
   views?: ViewConfigs<DB>
+  rpcs?: RpcConfigs<DB>
   /**
    * Optional hook to wrap collection options before `createCollection`.
    * Use this to add persistence (e.g., `persistedCollectionOptions` from @tanstack/db-sqlite-persistence-core).
@@ -171,12 +184,6 @@ function pickDefined(source: Record<string, unknown>, keys: readonly string[]): 
   return result
 }
 
-async function validateWithSchema(schema: StandardSchemaV1, data: unknown): Promise<unknown> {
-  const result = await schema['~standard'].validate(data)
-  if (result.issues) throw new Error(`Validation failed: ${JSON.stringify(result.issues)}`)
-  return result.value
-}
-
 function buildBaseCollectionOptions(
   name: string,
   config: Record<string, any>,
@@ -192,16 +199,13 @@ function buildBaseCollectionOptions(
   return {
     id: `supabase-sync:${name}`,
     queryKey,
-    queryFn: async (context: any) => {
-      return fetchTableData({
-        supabase,
-        tableName: name,
-        syncMode,
-        select,
-        loadSubsetOptions: context.meta?.loadSubsetOptions,
-        ...pickDefined(config, ['pageSize', 'inArrayChunkSize']),
-      })
-    },
+    queryFn: createQueryFn({
+      supabase,
+      tableName: name,
+      syncMode,
+      select,
+      ...pickDefined(config, ['pageSize', 'inArrayChunkSize']),
+    }),
     queryClient,
     syncMode,
     startSync,
@@ -210,74 +214,6 @@ function buildBaseCollectionOptions(
     ...(defaultIndexType !== undefined && { defaultIndexType }),
     ...pickDefined(config, QUERY_OPTION_KEYS),
   }
-}
-
-async function withRefetch(col: any, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-  } finally {
-    await col.utils.refetch()
-  }
-}
-
-const ALL_OPERATIONS: CrudOperation[] = ['insert', 'update', 'delete']
-
-function buildMutationHandlers(
-  tableName: string,
-  keyColumn: string,
-  schemas: TableSchemas | undefined,
-  supabase: any,
-  operations: CrudOperation[] = ALL_OPERATIONS,
-): Record<string, any> {
-  const ops = new Set(operations)
-  const table = () => supabase.from(tableName)
-  const handlers: Record<string, any> = {}
-
-  if (ops.has('insert')) {
-    handlers.onInsert = async ({ transaction, collection: col }: any) => {
-      await withRefetch(col, async () => {
-        const items = []
-        for (const mutation of transaction.mutations) {
-          let item = mutation.modified
-          if (schemas?.insert) {
-            item = await validateWithSchema(schemas.insert, item)
-          }
-          items.push(item)
-        }
-        const payload = items.length === 1 ? items[0] : items
-        const { error } = await table().insert(payload)
-        if (error) throw error
-      })
-    }
-  }
-
-  if (ops.has('update')) {
-    handlers.onUpdate = async ({ transaction, collection: col }: any) => {
-      await withRefetch(col, async () => {
-        for (const mutation of transaction.mutations) {
-          const { key, changes } = mutation
-          let updateData = changes
-          if (schemas?.update) {
-            updateData = await validateWithSchema(schemas.update, changes)
-          }
-          const { error } = await table().update(updateData).eq(keyColumn, key)
-          if (error) throw error
-        }
-      })
-    }
-  }
-
-  if (ops.has('delete')) {
-    handlers.onDelete = async ({ transaction, collection: col }: any) => {
-      await withRefetch(col, async () => {
-        const keys = transaction.mutations.map((m: any) => m.key)
-        const { error } = await table().delete().in(keyColumn, keys)
-        if (error) throw error
-      })
-    }
-  }
-
-  return handlers
 }
 
 function createCachedProxy(
@@ -333,7 +269,13 @@ export function createSupabaseCollections<DB, const TConfig extends SupabaseColl
     config.tables as any,
     (name, tableConfig) => {
       const opts = buildBaseCollectionOptions(name, tableConfig, supabase, queryClient)
-      Object.assign(opts, buildMutationHandlers(name, tableConfig.keyColumn, tableConfig.schemas, supabase, tableConfig.operations))
+      Object.assign(opts, createMutationHandlers({
+        tableName: name,
+        keyColumn: tableConfig.keyColumn,
+        schemas: tableConfig.schemas,
+        supabase,
+        operations: tableConfig.operations,
+      }))
       if (tableConfig.schemas?.row) opts.schema = tableConfig.schemas.row
       return finalizeCollection(opts)
     },
@@ -349,19 +291,7 @@ export function createSupabaseCollections<DB, const TConfig extends SupabaseColl
     },
   )
 
-  const rpc = new Proxy({} as any, {
-    get(_target, fnName: string | symbol) {
-      if (typeof fnName !== 'string' || PROXY_GUARD_KEYS.has(fnName)) return undefined
-      return (args: any) => ({
-        queryKey: ['rpc', fnName, args] as const,
-        queryFn: async () => {
-          const { data, error } = await (supabase as any).rpc(fnName, args)
-          if (error) throw error
-          return data
-        },
-      })
-    },
-  })
+  const rpc = createRpcProxy(supabase, config.rpcs as Record<string, RpcConfig> | undefined)
 
   return { tables, views, rpc } as SupabaseCollectionsResult<DB, TConfig>
 }

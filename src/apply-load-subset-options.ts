@@ -8,7 +8,41 @@ import type { LoadSubsetOptions } from '@tanstack/db'
 
 type SupabaseQueryBuilder = any
 
+// ---------------------------------------------------------------------------
+// Intermediate Representation
+// ---------------------------------------------------------------------------
+
+export interface PostgrestFilter {
+  field: string
+  op: string
+  value: unknown
+  /** Pre-quoted string value for PostgREST string syntax */
+  quotedValue: string
+}
+
+export type TranslatedExpr =
+  | { kind: 'filter'; filter: PostgrestFilter }
+  | { kind: 'in'; field: string; values: unknown[]; quotedValues: string[] }
+  | { kind: 'isNull'; field: string }
+  | { kind: 'and'; children: TranslatedExpr[] }
+  | { kind: 'or'; children: TranslatedExpr[] }
+  | { kind: 'not'; inner: TranslatedExpr }
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
 const COMPARISON_OPERATORS = new Set(['eq', 'gt', 'gte', 'lt', 'lte', 'like', 'ilike'])
+
+const POSTGREST_SPECIAL_CHARS = /[.,()'"\\]/
+
+function quotePostgrestValue(value: unknown): string {
+  const str = String(value)
+  if (POSTGREST_SPECIAL_CHARS.test(str)) {
+    return `"${str}"`
+  }
+  return str
+}
 
 function fieldName(expr: any): string {
   const path = extractFieldPath(expr)
@@ -21,17 +55,12 @@ function fieldName(expr: any): string {
   const leaf = path[path.length - 1]
   return column + intermediate.map((s) => `->${s}`).join('') + `->>${leaf}`
 }
-const POSTGREST_SPECIAL_CHARS = /[.,()'"\\]/
 
-function quotePostgrestValue(value: unknown): string {
-  const str = String(value)
-  if (POSTGREST_SPECIAL_CHARS.test(str)) {
-    return `"${str}"`
-  }
-  return str
-}
+// ---------------------------------------------------------------------------
+// Single-pass parser: IR expr → TranslatedExpr
+// ---------------------------------------------------------------------------
 
-function expressionToPostgrest(expr: any): string {
+export function translateExpr(expr: any): TranslatedExpr {
   if (expr.type === 'func') {
     const name: string = expr.name
     const args = expr.args
@@ -39,101 +68,99 @@ function expressionToPostgrest(expr: any): string {
     if (COMPARISON_OPERATORS.has(name)) {
       const field = fieldName(args[0])
       const value = extractValue(args[1])
-      return `${field}.${name}.${quotePostgrestValue(value)}`
+      return { kind: 'filter', filter: { field, op: name, value, quotedValue: quotePostgrestValue(value) } }
     }
 
     if (name === 'in') {
       const field = fieldName(args[0])
       const value = extractValue(args[1])
-      const items = Array.isArray(value) ? value.map(quotePostgrestValue).join(',') : quotePostgrestValue(value)
-      return `${field}.in.(${items})`
+      const items = Array.isArray(value) ? value : [value]
+      return { kind: 'in', field, values: items, quotedValues: items.map(quotePostgrestValue) }
     }
 
     if (name === 'isNull' || name === 'isUndefined') {
       const field = fieldName(args[0])
-      return `${field}.is.null`
+      return { kind: 'isNull', field }
     }
 
     if (name === 'and') {
-      const inner = args.map((a: any) => expressionToPostgrest(a)).join(',')
-      return `and(${inner})`
+      return { kind: 'and', children: args.map((a: any) => translateExpr(a)) }
     }
 
     if (name === 'or') {
-      const inner = args.map((a: any) => expressionToPostgrest(a)).join(',')
-      return `or(${inner})`
+      return { kind: 'or', children: args.map((a: any) => translateExpr(a)) }
     }
 
     if (name === 'not') {
-      const innerStr = expressionToPostgrest(args[0])
-      return `not.${innerStr}`
+      return { kind: 'not', inner: translateExpr(args[0]) }
     }
   }
 
   throw new Error(`Unsupported expression: ${JSON.stringify(expr)}`)
 }
 
-function applyWhere(query: SupabaseQueryBuilder, expr: any): SupabaseQueryBuilder {
-  if (expr.type === 'func') {
-    const name: string = expr.name
-    const args = expr.args
+// ---------------------------------------------------------------------------
+// Emitter 1: TranslatedExpr → PostgREST filter string
+// ---------------------------------------------------------------------------
 
-    if (COMPARISON_OPERATORS.has(name)) {
-      const field = fieldName(args[0])
-      const value = extractValue(args[1])
-      return query[name](field, value)
-    }
+export function toPostgrestString(node: TranslatedExpr): string {
+  switch (node.kind) {
+    case 'filter':
+      return `${node.filter.field}.${node.filter.op}.${node.filter.quotedValue}`
+    case 'in':
+      return `${node.field}.in.(${node.quotedValues.join(',')})`
+    case 'isNull':
+      return `${node.field}.is.null`
+    case 'and':
+      return `and(${node.children.map(toPostgrestString).join(',')})`
+    case 'or':
+      return `or(${node.children.map(toPostgrestString).join(',')})`
+    case 'not':
+      return `not.${toPostgrestString(node.inner)}`
+  }
+}
 
-    if (name === 'in') {
-      const field = fieldName(args[0])
-      const value = extractValue(args[1])
-      return query.in(field, value)
-    }
+// ---------------------------------------------------------------------------
+// Emitter 2: TranslatedExpr → Supabase query builder chain
+// ---------------------------------------------------------------------------
 
-    if (name === 'isNull' || name === 'isUndefined') {
-      const field = fieldName(args[0])
-      return query.is(field, null)
-    }
-
-    if (name === 'and') {
+export function applyToQuery(query: SupabaseQueryBuilder, node: TranslatedExpr): SupabaseQueryBuilder {
+  switch (node.kind) {
+    case 'filter':
+      return query[node.filter.op](node.filter.field, node.filter.value)
+    case 'in':
+      return query.in(node.field, node.values)
+    case 'isNull':
+      return query.is(node.field, null)
+    case 'and': {
       let q = query
-      for (const arg of args) {
-        q = applyWhere(q, arg)
+      for (const child of node.children) {
+        q = applyToQuery(q, child)
       }
       return q
     }
-
-    if (name === 'or') {
-      const postgrestFilter = args
-        .map((a: any) => expressionToPostgrest(a))
-        .join(',')
-      return query.or(postgrestFilter)
-    }
-
-    if (name === 'not') {
-      const inner = args[0]
-      if (inner.type === 'func') {
-        const innerName: string = inner.name
-        const field = fieldName(inner.args[0])
-
-        if (innerName === 'isNull' || innerName === 'isUndefined') {
-          return query.not(field, 'is', null)
-        }
-
-        if (innerName === 'in') {
-          const value = extractValue(inner.args[1])
-          const items = Array.isArray(value) ? value.map(quotePostgrestValue).join(',') : quotePostgrestValue(value)
-          return query.not(field, 'in', `(${items})`)
-        }
-
-        const value = extractValue(inner.args[1])
-        return query.not(field, innerName, value)
+    case 'or':
+      return query.or(node.children.map(toPostgrestString).join(','))
+    case 'not': {
+      const inner = node.inner
+      if (inner.kind === 'isNull') {
+        return query.not(inner.field, 'is', null)
       }
+      if (inner.kind === 'in') {
+        return query.not(inner.field, 'in', `(${inner.quotedValues.join(',')})`)
+      }
+      if (inner.kind === 'filter') {
+        return query.not(inner.filter.field, inner.filter.op, inner.filter.value)
+      }
+      // Fallback for not(and(...)), not(or(...)) etc — use string form
+      return query.or(`not.${toPostgrestString(inner)}`)
     }
   }
-
-  throw new Error(`Unsupported where expression: ${JSON.stringify(expr)}`)
 }
+
+// ---------------------------------------------------------------------------
+// Helpers for IN-array chunking (used by fetch-table-data)
+// ---------------------------------------------------------------------------
 
 /**
  * Finds the first in() expression in the where tree and returns the field + items.
@@ -184,6 +211,10 @@ export function replaceInArrayExpression(expr: any, field: string, newItems: any
   return expr
 }
 
+// ---------------------------------------------------------------------------
+// Public API: applyLoadSubsetOptions (unchanged interface)
+// ---------------------------------------------------------------------------
+
 export function applyLoadSubsetOptions(
   query: SupabaseQueryBuilder,
   options: LoadSubsetOptions,
@@ -191,11 +222,11 @@ export function applyLoadSubsetOptions(
   let q = query
 
   if (options.where) {
-    q = applyWhere(q, options.where)
+    q = applyToQuery(q, translateExpr(options.where))
   }
 
   if (options.cursor?.whereFrom) {
-    q = applyWhere(q, options.cursor.whereFrom)
+    q = applyToQuery(q, translateExpr(options.cursor.whereFrom))
   }
 
   if (options.orderBy) {

@@ -106,12 +106,25 @@ export interface SupabaseCollectionsConfig<DB> {
 type SyncCollection<TRow extends Record<string, unknown>> =
   Collection<TRow, string | number, QueryCollectionUtils<TRow, string | number, TRow, unknown>, any, TRow>
 
-type AllTableCollections<DB> = {
-  [K in keyof TablesOf<DB>]: SyncCollection<RowOf<TablesOf<DB>[K]> & Record<string, unknown>>
+type InferRowType<TDefault extends Record<string, unknown>, TConfig> =
+  [TConfig] extends [never]
+    ? TDefault
+    : TConfig extends { schemas: { row: infer S extends StandardSchemaV1 } }
+      ? StandardSchemaV1.InferOutput<S> extends Record<string, unknown>
+        ? StandardSchemaV1.InferOutput<S>
+        : TDefault
+      : TDefault
+
+type AllTableCollections<DB, TConfigs> = {
+  [K in keyof TablesOf<DB>]: SyncCollection<
+    InferRowType<RowOf<TablesOf<DB>[K]> & Record<string, unknown>, K extends keyof NonNullable<TConfigs> ? NonNullable<TConfigs>[K] : never>
+  >
 }
 
-type AllViewCollections<DB> = {
-  [K in keyof ViewsOf<DB>]: SyncCollection<RowOf<ViewsOf<DB>[K]> & Record<string, unknown>>
+type AllViewCollections<DB, TConfigs> = {
+  [K in keyof ViewsOf<DB>]: SyncCollection<
+    InferRowType<RowOf<ViewsOf<DB>[K]> & Record<string, unknown>, K extends keyof NonNullable<TConfigs> ? NonNullable<TConfigs>[K] : never>
+  >
 }
 
 export type RpcQueryOptions<TReturns> = {
@@ -127,9 +140,9 @@ type RpcResult<DB> = {
     : (args: ArgsOf<FunctionsOf<DB>[K]>) => RpcQueryOptions<ReturnsOf<FunctionsOf<DB>[K]>>
 }
 
-interface SupabaseCollectionsResult<DB> {
-  tables: AllTableCollections<DB>
-  views: AllViewCollections<DB>
+interface SupabaseCollectionsResult<DB, TConfig extends SupabaseCollectionsConfig<DB>> {
+  tables: AllTableCollections<DB, TConfig['tables']>
+  views: AllViewCollections<DB, TConfig['views']>
   rpc: RpcResult<DB>
 }
 
@@ -278,11 +291,11 @@ function createCachedProxy(
 // Main function
 // ---------------------------------------------------------------------------
 
-export function createSupabaseCollections<DB>(
+export function createSupabaseCollections<DB, const TConfig extends SupabaseCollectionsConfig<DB> = SupabaseCollectionsConfig<DB>>(
   supabase: SupabaseClientLike,
   queryClient: QueryClient,
-  config: SupabaseCollectionsConfig<DB>,
-): SupabaseCollectionsResult<DB> {
+  config: TConfig,
+): SupabaseCollectionsResult<DB, TConfig> {
   const { wrapOptions } = config
 
   const finalizeCollection = (opts: any) => {
@@ -325,5 +338,5 @@ export function createSupabaseCollections<DB>(
     },
   })
 
-  return { tables, views, rpc } as SupabaseCollectionsResult<DB>
+  return { tables, views, rpc } as SupabaseCollectionsResult<DB, TConfig>
 }

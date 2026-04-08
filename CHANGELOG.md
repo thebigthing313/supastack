@@ -1,5 +1,11 @@
 # supabase-sync
 
+## 0.3.1
+
+### Patch Changes
+
+- Fix collection return type to use the Zod row schema output type (`StandardSchemaV1.InferOutput`) instead of the raw database row type when a `schemas.row` is provided.
+
 ## 0.3.0
 
 ### Minor Changes

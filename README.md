@@ -1,4 +1,4 @@
-# supabase-sync
+# supastack
 
 Type-safe [TanStack DB](https://tanstack.com/db) collections and [TanStack Query](https://tanstack.com/query) options for [Supabase](https://supabase.com) tables, views, and RPC functions.
 
@@ -13,9 +13,9 @@ All fully typed end-to-end from your `database.types.ts`.
 ## Install
 
 ```bash
-npm install supabase-sync
+npm install supastack
 # or
-pnpm add supabase-sync
+pnpm add supastack
 ```
 
 ### Peer dependencies
@@ -43,7 +43,7 @@ supabase gen types typescript --local > src/database.types.ts
 ```ts
 import { createClient } from '@supabase/supabase-js'
 import { QueryClient } from '@tanstack/query-core'
-import { createSupabaseCollections } from 'supabase-sync'
+import { createSupabaseCollections } from 'supastack'
 import type { Database } from './database.types'
 
 const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -233,7 +233,7 @@ Any library implementing the [Standard Schema](https://github.com/standard-schem
 TypeScript widens schema types when config is stored in a variable. Use `defineConfig` to preserve literal types:
 
 ```ts
-import { createSupabaseCollections, defineConfig } from 'supabase-sync'
+import { createSupabaseCollections, defineConfig } from 'supastack'
 
 const define = defineConfig<Database>()
 
@@ -252,7 +252,7 @@ const db = createSupabaseCollections<Database>(supabase, queryClient, config)
 
 ## On-demand collections
 
-For large tables, use `syncMode: 'on-demand'` to fetch only rows matching the current query. TanStack DB pushes predicates down and supabase-sync translates them to PostgREST filters.
+For large tables, use `syncMode: 'on-demand'` to fetch only rows matching the current query. TanStack DB pushes predicates down and supastack translates them to PostgREST filters.
 
 ```ts
 const db = createSupabaseCollections<Database>(supabase, queryClient, {
@@ -318,7 +318,7 @@ const result = await db.rpc.search_todos({ query: 'hello' }).queryFn()
 
 ## Advanced exports
 
-For building custom integrations on top of supabase-sync:
+For building custom integrations on top of supastack:
 
 ```ts
 import {
@@ -341,7 +341,7 @@ import {
 
   // Legacy (use executeQuery instead)
   fetchTableData,
-} from 'supabase-sync'
+} from 'supastack'
 ```
 
 ```ts
@@ -356,7 +356,7 @@ import type {
   RpcConfig,
   MutationHandlerConfig,
   MutationHandlers,
-} from 'supabase-sync'
+} from 'supastack'
 ```
 
 ## License

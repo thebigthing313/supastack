@@ -1,4 +1,4 @@
-import { applyLoadSubsetOptions, findInArrayExpression, replaceInArrayExpression } from './apply-load-subset-options'
+import { applyLoadSubsetOptions, findInArrayExpression, replaceInArrayExpression } from './apply-load-subset-options.ts'
 import type { LoadSubsetOptions } from '@tanstack/db'
 
 const DEFAULT_PAGE_SIZE = 1000

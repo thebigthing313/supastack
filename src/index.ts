@@ -10,9 +10,9 @@ interface SupabaseClientLike {
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Collection } from '@tanstack/db'
 import type { QueryCollectionUtils } from '@tanstack/query-db-collection'
-import { fetchTableData } from './fetch-table-data'
-export { applyLoadSubsetOptions } from './apply-load-subset-options'
-export { fetchTableData } from './fetch-table-data'
+import { fetchTableData } from './fetch-table-data.ts'
+export { applyLoadSubsetOptions } from './apply-load-subset-options.ts'
+export { fetchTableData } from './fetch-table-data.ts'
 
 // ---------------------------------------------------------------------------
 // Type-level utilities for extracting table/view/function info from Database

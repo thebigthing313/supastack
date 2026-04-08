@@ -1,5 +1,11 @@
 # supabase-sync
 
+## 0.3.4
+
+### Patch Changes
+
+- Fix compiled output missing `.js` extensions on relative imports, which broke Node ESM resolution. Source imports now use `.ts` extensions with `rewriteRelativeImportExtensions` in tsconfig.
+
 ## 0.3.3
 
 ### Patch Changes

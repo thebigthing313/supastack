@@ -77,6 +77,37 @@ describe('createSupabaseCollections', () => {
       expect(db.tables.users).toBe(db.tables.users)
     })
 
+    it('supports spread and Object.keys on tables proxy', () => {
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        tables: {
+          users: { keyColumn: 'id' },
+          posts: { keyColumn: 'id' },
+        },
+      })
+
+      expect(Object.keys(db.tables)).toEqual(expect.arrayContaining(['users', 'posts']))
+      expect(Object.keys(db.tables)).toHaveLength(2)
+
+      const spread = { ...db.tables }
+      expect(spread.users).toBeDefined()
+      expect(spread.posts).toBeDefined()
+      expect(spread.users).toBe(db.tables.users)
+    })
+
+    it('supports spread and Object.keys on views proxy', () => {
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        views: {
+          active_users: { keyColumn: 'id' },
+        },
+      })
+
+      expect(Object.keys(db.views)).toEqual(['active_users'])
+
+      const spread = { ...db.views }
+      expect(spread.active_users).toBeDefined()
+      expect(spread.active_users).toBe(db.views.active_users)
+    })
+
     it('fetches rows via supabase.from(tableName).select when syncing', async () => {
       const mockRows = [
         { id: 1, username: 'alice', status: 'ONLINE' as const, created_at: '2024-01-01' },

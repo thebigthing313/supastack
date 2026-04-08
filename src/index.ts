@@ -281,7 +281,7 @@ function createCachedProxy(
   configMap: Record<string, any> | undefined,
   factory: (name: string, config: any) => any,
 ) {
-  return new Proxy({} as any, {
+  const proxy = new Proxy({} as any, {
     get(_target, name: string | symbol) {
       if (typeof name !== 'string' || PROXY_GUARD_KEYS.has(name)) return undefined
       if (cache.has(name)) return cache.get(name)
@@ -293,7 +293,16 @@ function createCachedProxy(
       cache.set(name, item)
       return item
     },
+    ownKeys() {
+      return Object.keys(configMap ?? {})
+    },
+    getOwnPropertyDescriptor(_target, name) {
+      if (typeof name === 'string' && configMap && name in configMap) {
+        return { configurable: true, enumerable: true, value: proxy[name] }
+      }
+    },
   })
+  return proxy
 }
 
 // ---------------------------------------------------------------------------

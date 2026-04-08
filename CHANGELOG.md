@@ -1,5 +1,11 @@
 # supabase-sync
 
+## 0.3.5
+
+### Patch Changes
+
+- Fix `{ ...db.tables }` and `Object.keys(db.tables)` — Proxy objects now support spread and enumeration via `ownKeys`/`getOwnPropertyDescriptor` traps while preserving lazy collection creation.
+
 ## 0.3.4
 
 ### Patch Changes

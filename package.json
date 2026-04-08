@@ -1,6 +1,6 @@
 {
   "name": "supastack",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Type-safe TanStack DB collections and TanStack Query options for Supabase tables, views, and RPC functions",
   "type": "module",
   "main": "./dist/index.js",

@@ -349,6 +349,7 @@ describe('createSupabaseCollections', () => {
     })
   })
 
+
   describe('view collections', () => {
     it('creates a read-only collection for a configured view', async () => {
       const mockRows = [{ id: 1, username: 'alice', status: 'ONLINE' as const }]

@@ -193,7 +193,7 @@ function buildBaseCollectionOptions(
   const { keyColumn, syncMode = 'eager', startSync = true, select = '*', autoIndex, defaultIndexType } = config
 
   const queryKey: any = syncMode === 'on-demand'
-    ? (opts: any) => [name, { where: opts.where, orderBy: opts.orderBy, limit: opts.limit, offset: opts.offset }]
+    ? (opts: any) => [name, opts]
     : [name]
 
   return {

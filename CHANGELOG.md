@@ -1,5 +1,11 @@
 # supabase-sync
 
+## 0.3.6
+
+### Patch Changes
+
+- On-demand collections now use a `queryKey` function that serializes `LoadSubsetOptions` (where, orderBy, limit, offset), giving each unique predicate set its own TanStack Query cache entry.
+
 ## 0.3.5
 
 ### Patch Changes

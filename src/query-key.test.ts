@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { QueryClient } from '@tanstack/query-core'
 
-// vi.hoisted ensures the spy is available when the hoisted vi.mock factory runs
 const { queryCollectionOptionsSpy } = vi.hoisted(() => ({
   queryCollectionOptionsSpy: vi.fn((opts: any) => opts),
 }))
@@ -60,7 +59,7 @@ describe('on-demand queryKey (issue #5)', () => {
     expect(opts.queryKey).toEqual(['users'])
   })
 
-  it('base key from empty opts is [name, {}] with no extra keys', () => {
+  it('base key from empty opts is [name]', () => {
     const db = createSupabaseCollections<Database>(supabase, queryClient, {
       tables: { users: { keyColumn: 'id', syncMode: 'on-demand' } },
     })
@@ -69,10 +68,7 @@ describe('on-demand queryKey (issue #5)', () => {
     const queryKeyFn = queryCollectionOptionsSpy.mock.calls[0][0].queryKey
     const baseKey = queryKeyFn({})
 
-    expect(baseKey).toEqual(['users', {}])
-    // Must have zero own keys — undefined-valued keys like { where: undefined }
-    // would break TanStack Query's prefix matching (the original bug).
-    expect(Object.keys(baseKey[1])).toEqual([])
+    expect(baseKey).toEqual(['users'])
   })
 
   it('full key with query params extends the base prefix', () => {
@@ -91,7 +87,8 @@ describe('on-demand queryKey (issue #5)', () => {
       offset: 0,
     })
 
-    // Same array length — [name, opts]
+    // Base [name] is a prefix of [name, { ... }]
+    expect(baseKey).toEqual(['users'])
     expect(fullKey[0]).toBe('users')
     expect(fullKey[1]).toEqual({
       where: { id: 1 },
@@ -99,26 +96,43 @@ describe('on-demand queryKey (issue #5)', () => {
       limit: 100,
       offset: 0,
     })
-
-    // TanStack Query prefix matching: every key in the base object must exist
-    // with the same value in the full object. Since base is {}, any object matches.
-    for (const key of Object.keys(baseKey[1])) {
-      expect(fullKey[1][key]).toEqual(baseKey[1][key])
-    }
   })
 
-  it('queryKey passthrough preserves the opts object identity', () => {
+  it('only includes serializable fields, not the full opts object', () => {
     const db = createSupabaseCollections<Database>(supabase, queryClient, {
       tables: { users: { keyColumn: 'id', syncMode: 'on-demand' } },
     })
     db.tables.users
 
     const queryKeyFn = queryCollectionOptionsSpy.mock.calls[0][0].queryKey
-    const opts = { where: { status: 'active' } }
+    const opts = {
+      where: { id: 1 },
+      limit: 10,
+      somethingCircular: { self: null as any },
+    }
+    opts.somethingCircular.self = opts.somethingCircular
     const key = queryKeyFn(opts)
 
-    // The opts object is passed through directly, not destructured
-    expect(key[1]).toBe(opts)
+    // Only where/orderBy/limit/offset are picked — no extra fields leak through
+    expect(key[1]).toEqual({ where: { id: 1 }, limit: 10 })
+    expect(key[1]).not.toHaveProperty('somethingCircular')
+  })
+
+  it('key is JSON-serializable', () => {
+    const db = createSupabaseCollections<Database>(supabase, queryClient, {
+      tables: { users: { keyColumn: 'id', syncMode: 'on-demand' } },
+    })
+    db.tables.users
+
+    const queryKeyFn = queryCollectionOptionsSpy.mock.calls[0][0].queryKey
+    const key = queryKeyFn({
+      where: { status: 'active' },
+      orderBy: [{ column: 'name', direction: 'asc' }],
+      limit: 50,
+      offset: 10,
+    })
+
+    expect(() => JSON.stringify(key)).not.toThrow()
   })
 
   it('works for on-demand view collections', () => {
@@ -130,8 +144,7 @@ describe('on-demand queryKey (issue #5)', () => {
     const queryKeyFn = queryCollectionOptionsSpy.mock.calls[0][0].queryKey
     const baseKey = queryKeyFn({})
 
-    expect(baseKey).toEqual(['active_users', {}])
-    expect(Object.keys(baseKey[1])).toEqual([])
+    expect(baseKey).toEqual(['active_users'])
   })
 
   it('different query params produce different keys', () => {

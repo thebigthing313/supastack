@@ -1,4 +1,31 @@
-# supabase-sync
+# supastack
+
+## 1.0.3
+
+### Patch Changes
+
+- Fix on-demand `queryKey` to produce a clean `[name]` base prefix instead of `[name, { where: undefined, ... }]`, which broke TanStack Query's prefix matching and caused stale cache warnings (#5). Only serializable fields (`where`, `orderBy`, `limit`, `offset`) are included when defined.
+
+## 1.0.2 (yanked)
+
+### Patch Changes
+
+- Attempted fix for #5 by passing `opts` through directly — caused `JSON.stringify` failures due to circular references in the full opts object.
+
+## 1.0.1
+
+### Patch Changes
+
+- Tighten peer dependency ranges for `@tanstack/db`, `@tanstack/query-db-collection`, and `@tanstack/query-core`.
+- Drop npm publish workflow; add troubleshooting note to README.
+
+## 1.0.0
+
+### Major Changes
+
+- Rename package from `supabase-sync` to `supastack`.
+- Stable release — no API changes from 0.3.x.
+- Add CI workflow (Node 20, 22).
 
 ## 0.3.6
 

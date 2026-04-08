@@ -296,9 +296,12 @@ function createCachedProxy(
     ownKeys() {
       return Object.keys(configMap ?? {})
     },
-    getOwnPropertyDescriptor(_target, name) {
+    getOwnPropertyDescriptor(_target, name): PropertyDescriptor | undefined {
       if (typeof name === 'string' && configMap && name in configMap) {
-        return { configurable: true, enumerable: true, value: proxy[name] }
+        if (!cache.has(name)) {
+          cache.set(name, factory(name, configMap[name]))
+        }
+        return { configurable: true, enumerable: true, value: cache.get(name) }
       }
     },
   })

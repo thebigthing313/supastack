@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { QueryClient } from '@tanstack/query-core'
 import { z } from 'zod'
 import { eq, and, inArray, IR, BasicIndex } from '@tanstack/db'
-import { createSupabaseCollections, fetchTableData } from './index'
+import { createSupabaseCollections, defineConfig, fetchTableData } from './index'
 import type { Database } from './test-utils/database.types'
 
 const ref = (name: string) => new IR.PropRef([name])
@@ -486,6 +486,39 @@ describe('createSupabaseCollections', () => {
       // The update schema should have uppercased the username
       const updatedChanges = supabase._spies.updateSpy.mock.calls[0][0]
       expect(updatedChanges.username).toBe('ALICE_UPDATED')
+    })
+
+    it('preserves row schema types through defineConfig', async () => {
+      supabase._spies.selectSpy.mockResolvedValue({
+        data: [{ id: 1, username: 'alice', status: 'ONLINE', created_at: '2024-01-01T00:00:00Z' }],
+        error: null,
+      })
+
+      const userRowSchema = z.object({
+        id: z.number(),
+        username: z.string(),
+        status: z.enum(['ONLINE', 'OFFLINE']).nullable(),
+        created_at: z.string().transform((s) => new Date(s)),
+      })
+
+      // defineConfig preserves literal schema types through variable assignment
+      const define = defineConfig<Database>()
+      const config = define({
+        tables: {
+          users: {
+            keyColumn: 'id',
+            schemas: { row: userRowSchema },
+          },
+        },
+      })
+
+      const db = createSupabaseCollections<Database>(supabase, queryClient, config)
+
+      const collection = db.tables.users
+      await collection.utils.refetch()
+
+      expect(supabase.from).toHaveBeenCalledWith('users')
+      expect(collection).toBeDefined()
     })
   })
 

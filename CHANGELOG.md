@@ -5,6 +5,7 @@
 ### Patch Changes
 
 - Fix collection return type to use the Zod row schema output type (`StandardSchemaV1.InferOutput`) instead of the raw database row type when a `schemas.row` is provided.
+- Add `defineConfig<DB>()` helper to preserve literal schema types through variable assignment (same pattern as Vite's `defineConfig`).
 
 ## 0.3.0
 

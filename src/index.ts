@@ -340,3 +340,18 @@ export function createSupabaseCollections<DB, const TConfig extends SupabaseColl
 
   return { tables, views, rpc } as SupabaseCollectionsResult<DB, TConfig>
 }
+
+/**
+ * Returns a curried identity function that preserves literal schema types
+ * through variable assignment. Use this when storing config in a separate
+ * variable/file — without it, TypeScript widens the type and row schema
+ * inference is lost.
+ *
+ * ```ts
+ * const defineMyConfig = defineConfig<Database>()
+ * export const config = defineMyConfig({ tables: { users: { keyColumn: 'id', schemas: { row: userSchema } } } })
+ * ```
+ */
+export function defineConfig<DB>() {
+  return <const T extends SupabaseCollectionsConfig<DB>>(config: T): T => config
+}

@@ -103,8 +103,8 @@ export interface SupabaseCollectionsConfig<DB> {
 // Return types
 // ---------------------------------------------------------------------------
 
-type SyncCollection<TRow extends Record<string, unknown>> =
-  Collection<TRow, string | number, QueryCollectionUtils<TRow, string | number, TRow, unknown>, any, TRow>
+type SyncCollection<TRow extends Record<string, unknown>, TKey extends string | number = string | number> =
+  Collection<TRow, TKey, QueryCollectionUtils<TRow, TKey, TRow, unknown>, any, TRow>
 
 type InferRowType<TDefault extends Record<string, unknown>, TConfig> =
   [TConfig] extends [never]
@@ -115,15 +115,24 @@ type InferRowType<TDefault extends Record<string, unknown>, TConfig> =
         : TDefault
       : TDefault
 
+type InferKeyType<TRow extends Record<string, unknown>, TConfig> =
+  [TConfig] extends [never]
+    ? string | number
+    : TConfig extends { keyColumn: infer K extends keyof TRow }
+      ? TRow[K] extends string | number ? TRow[K] : string | number
+      : string | number
+
 type AllTableCollections<DB, TConfigs> = {
   [K in keyof TablesOf<DB>]: SyncCollection<
-    InferRowType<RowOf<TablesOf<DB>[K]> & Record<string, unknown>, K extends keyof NonNullable<TConfigs> ? NonNullable<TConfigs>[K] : never>
+    InferRowType<RowOf<TablesOf<DB>[K]> & Record<string, unknown>, K extends keyof NonNullable<TConfigs> ? NonNullable<TConfigs>[K] : never>,
+    InferKeyType<RowOf<TablesOf<DB>[K]> & Record<string, unknown>, K extends keyof NonNullable<TConfigs> ? NonNullable<TConfigs>[K] : never>
   >
 }
 
 type AllViewCollections<DB, TConfigs> = {
   [K in keyof ViewsOf<DB>]: SyncCollection<
-    InferRowType<RowOf<ViewsOf<DB>[K]> & Record<string, unknown>, K extends keyof NonNullable<TConfigs> ? NonNullable<TConfigs>[K] : never>
+    InferRowType<RowOf<ViewsOf<DB>[K]> & Record<string, unknown>, K extends keyof NonNullable<TConfigs> ? NonNullable<TConfigs>[K] : never>,
+    InferKeyType<RowOf<ViewsOf<DB>[K]> & Record<string, unknown>, K extends keyof NonNullable<TConfigs> ? NonNullable<TConfigs>[K] : never>
   >
 }
 

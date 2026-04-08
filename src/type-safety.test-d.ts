@@ -1,6 +1,8 @@
 import { describe, it, expectTypeOf } from 'vitest'
 import { QueryClient } from '@tanstack/query-core'
-import { createSupabaseCollections } from './index'
+import { z } from 'zod'
+import type { Collection } from '@tanstack/db'
+import { createSupabaseCollections, defineConfig } from './index'
 import type { Database } from './test-utils/database.types'
 
 const supabase = {} as any
@@ -47,6 +49,67 @@ describe('type safety', () => {
         Database['public']['Enums']['user_status']
       >()
     })
+    it('collection key type is inferred from keyColumn, not string | number', () => {
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        tables: {
+          users: { keyColumn: 'id' },  // id: number
+          posts: { keyColumn: 'id' },  // id: string
+        },
+        views: { active_users: { keyColumn: 'id' } }, // id: number
+      })
+
+      // users.id is number in the DB schema → key should be number
+      expectTypeOf(db.tables.users).toMatchTypeOf<Collection<any, number, any, any, any>>()
+      // posts.id is string → key should be string
+      expectTypeOf(db.tables.posts).toMatchTypeOf<Collection<any, string, any, any, any>>()
+      // active_users.id is number → key should be number
+      expectTypeOf(db.views.active_users).toMatchTypeOf<Collection<any, number, any, any, any>>()
+
+      // Should NOT match the wrong key type
+      expectTypeOf(db.tables.users).not.toMatchTypeOf<Collection<any, string, any, any, any>>()
+      expectTypeOf(db.tables.posts).not.toMatchTypeOf<Collection<any, number, any, any, any>>()
+    })
+
+    it('row schema output type flows through to the collection type', () => {
+      const userRowSchema = z.object({
+        id: z.number(),
+        username: z.string(),
+        status: z.enum(['ONLINE', 'OFFLINE']).nullable(),
+        created_at: z.string().transform((s) => new Date(s)),
+      })
+
+      const db = createSupabaseCollections<Database>(supabase, queryClient, {
+        tables: {
+          users: { keyColumn: 'id', schemas: { row: userRowSchema } },
+        },
+      })
+
+      // created_at should be Date (from schema transform), not string (from DB)
+      expectTypeOf(db.tables.users).toMatchTypeOf<Collection<{ created_at: Date }, any, any, any, any>>()
+      expectTypeOf(db.tables.users).not.toMatchTypeOf<Collection<{ created_at: string }, any, any, any, any>>()
+    })
+
+    it('row schema types are preserved through defineConfig', () => {
+      const userRowSchema = z.object({
+        id: z.number(),
+        username: z.string(),
+        status: z.enum(['ONLINE', 'OFFLINE']).nullable(),
+        created_at: z.string().transform((s) => new Date(s)),
+      })
+
+      const define = defineConfig<Database>()
+      const config = define({
+        tables: {
+          users: { keyColumn: 'id', schemas: { row: userRowSchema } },
+        },
+      })
+
+      const db = createSupabaseCollections<Database>(supabase, queryClient, config)
+
+      expectTypeOf(db.tables.users).toMatchTypeOf<Collection<{ created_at: Date }, any, any, any, any>>()
+      expectTypeOf(db.tables.users).not.toMatchTypeOf<Collection<{ created_at: string }, any, any, any, any>>()
+    })
+
     it('overloaded rpc function accepts any valid overload args', () => {
       const db = createSupabaseCollections<Database>(supabase, queryClient, {})
 

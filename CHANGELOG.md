@@ -1,5 +1,11 @@
 # supabase-sync
 
+## 0.3.3
+
+### Patch Changes
+
+- Narrow collection key type to match the actual `keyColumn` type from the DB schema instead of `string | number`.
+
 ## 0.3.2
 
 ### Patch Changes

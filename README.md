@@ -359,6 +359,10 @@ import type {
 } from 'supastack'
 ```
 
+## Troubleshooting
+
+If you see type errors about `Collection` not being assignable, you likely have duplicate versions of `@tanstack/db`. Run `pnpm dedupe` to fix it.
+
 ## License
 
 [MIT](LICENSE.md)

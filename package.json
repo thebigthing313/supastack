@@ -37,7 +37,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/thebigthing313/supabase-sync.git"
+    "url": "https://github.com/thebigthing313/supastack.git"
   },
   "sideEffects": false,
   "packageManager": "pnpm@10.13.1",

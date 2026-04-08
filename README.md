@@ -123,6 +123,20 @@ function SearchResults({ query }: { query: string }) {
       // Optional: 'eager' (default) loads all rows, 'on-demand' uses predicate pushdown
       syncMode: 'eager',
 
+      // Optional: start syncing immediately (default: true). Set false for auth-gated collections.
+      startSync: true,
+
+      // Optional: column selection passed to Supabase's .select(). Defaults to '*'.
+      select: 'id, title, completed',
+
+      // Optional: which mutation operations to enable. Defaults to all three.
+      // Use operations: [] for read-only table collections.
+      operations: ['insert', 'update', 'delete'],
+
+      // Optional: automatic index creation for where expressions
+      autoIndex: 'eager',         // 'off' (default) or 'eager'
+      defaultIndexType: BasicIndex, // required when autoIndex is 'eager'
+
       // Optional: TanStack Query options
       staleTime: 30_000,
       refetchInterval: 60_000,
@@ -143,6 +157,10 @@ function SearchResults({ query }: { query: string }) {
       },
     },
   },
+
+  // Optional: hook to wrap collection options before createCollection.
+  // Use for persistence (e.g., persistedCollectionOptions from @tanstack/db-sqlite-persistence-core).
+  wrapOptions: (options) => persistedCollectionOptions(options),
 }
 ```
 
@@ -189,7 +207,33 @@ const db = createSupabaseCollections<Database>(supabase, queryClient, {
 })
 ```
 
+When a `schemas.row` is provided, the collection's TypeScript type reflects the schema's output type (e.g., `created_at: Date` instead of `string`).
+
 Any schema library implementing the [Standard Schema](https://github.com/standard-schema/standard-schema) protocol works (Zod, Valibot, ArkType, etc.).
+
+### Preserving types with `defineConfig`
+
+TypeScript widens schema types when config is stored in a variable. Use `defineConfig` to preserve literal types through variable assignment:
+
+```ts
+import { createSupabaseCollections, defineConfig } from 'supabase-sync'
+
+const define = defineConfig<Database>()
+
+// Schema types are preserved — db.tables.todos has created_at: Date, not string
+export const config = define({
+  tables: {
+    todos: {
+      keyColumn: 'id',
+      schemas: { row: todoRowSchema },
+    },
+  },
+})
+
+const db = createSupabaseCollections<Database>(supabase, queryClient, config)
+```
+
+This follows the same pattern as Vite's `defineConfig`. Without it, storing config in a separate variable loses the specific schema types and the collection falls back to the raw database row type.
 
 ## On-demand collections
 
@@ -263,6 +307,7 @@ const result = await db.rpc.search_todos({ query: 'hello' }).queryFn()
 ```ts
 import {
   createSupabaseCollections, // main factory
+  defineConfig,              // config helper that preserves schema types
   applyLoadSubsetOptions,    // expression mapper (for advanced use)
   fetchTableData,            // data fetcher (for advanced use)
 } from 'supabase-sync'

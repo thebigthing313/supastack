@@ -1,5 +1,11 @@
-import { applyLoadSubsetOptions, findInArrayExpression, replaceInArrayExpression } from './apply-load-subset-options.ts'
 import type { LoadSubsetOptions } from '@tanstack/db'
+import { applyQueryPlan } from './apply-load-subset-options.ts'
+import {
+  compileLoadSubsetOptions,
+  findChunkableInPredicate,
+  withInPredicateValues,
+} from './load-subset-query-plan.ts'
+import type { ChunkableInPredicate, SupabaseQueryPlan } from './load-subset-query-plan.ts'
 
 const DEFAULT_PAGE_SIZE = 1000
 const DEFAULT_IN_ARRAY_CHUNK_SIZE = 200
@@ -48,22 +54,22 @@ async function readRelation(
   config: NormalizedRelationReaderConfig,
   loadSubsetOptions?: LoadSubsetOptions,
 ): Promise<any[]> {
-  const options = loadSubsetOptions ?? {}
+  const plan = compileLoadSubsetOptions(loadSubsetOptions ?? {})
 
   if (config.syncMode === 'on-demand') {
-    assertSafeOnDemandRead(config.relationName, options)
+    assertSafeOnDemandRead(config.relationName, plan)
   }
 
-  const chunkedInExpression = getChunkedInExpression(options, config.inArrayChunkSize)
-  if (chunkedInExpression) {
-    return fetchChunkedQueries(config, options, chunkedInExpression)
+  const chunkedInPredicate = getChunkedInPredicate(plan, config.inArrayChunkSize)
+  if (chunkedInPredicate) {
+    return fetchChunkedQueries(config, plan, chunkedInPredicate)
   }
 
-  if (hasExplicitWindow(options)) {
-    return fetchSingleQuery(config, options)
+  if (hasExplicitWindow(plan)) {
+    return fetchSingleQuery(config, plan)
   }
 
-  return fetchAllPages(config, options)
+  return fetchAllPages(config, plan)
 }
 
 function normalizeRelationReaderConfig(config: RelationReaderConfig): NormalizedRelationReaderConfig {
@@ -89,8 +95,8 @@ function positiveIntegerOrDefault(value: number | undefined, fallback: number, n
   return value
 }
 
-function assertSafeOnDemandRead(relationName: string, options: LoadSubsetOptions): void {
-  if (!options.where && options.limit == null && !options.cursor) {
+function assertSafeOnDemandRead(relationName: string, plan: SupabaseQueryPlan): void {
+  if (plan.predicates.length === 0 && !hasExplicitWindow(plan)) {
     throw new Error(
       `On-demand collection "${relationName}" requires a where clause, limit, or cursor. ` +
       `Predicateless queries on on-demand collections would fetch the entire table.`,
@@ -98,30 +104,28 @@ function assertSafeOnDemandRead(relationName: string, options: LoadSubsetOptions
   }
 }
 
-function hasExplicitWindow(options: LoadSubsetOptions): boolean {
-  return options.limit != null || options.offset != null
+function hasExplicitWindow(plan: SupabaseQueryPlan): boolean {
+  return plan.limit != null || plan.range != null
 }
 
-function getChunkedInExpression(
-  options: LoadSubsetOptions,
+function getChunkedInPredicate(
+  plan: SupabaseQueryPlan,
   chunkSize: number,
-): { field: string; items: any[] } | null {
-  if (!options.where) return null
+): ChunkableInPredicate | null {
+  const inPredicate = findChunkableInPredicate(plan)
+  if (!inPredicate || inPredicate.values.length <= chunkSize) return null
 
-  const inExpression = findInArrayExpression(options.where)
-  if (!inExpression || inExpression.items.length <= chunkSize) return null
-
-  return inExpression
+  return inPredicate
 }
 
 async function fetchChunkedQueries(
   config: NormalizedRelationReaderConfig,
-  options: LoadSubsetOptions,
-  inExpression: { field: string; items: any[] },
+  plan: SupabaseQueryPlan,
+  inPredicate: ChunkableInPredicate,
 ): Promise<any[]> {
-  const requests = chunk(inExpression.items, config.inArrayChunkSize).map((itemChunk) => {
-    const where = replaceInArrayExpression(options.where, inExpression.field, itemChunk)
-    return fetchSingleQuery(config, { ...options, where })
+  const requests = chunk(inPredicate.values, config.inArrayChunkSize).map((itemChunk) => {
+    const chunkedPlan = withInPredicateValues(plan, inPredicate.field, itemChunk)
+    return fetchSingleQuery(config, chunkedPlan)
   })
 
   const results = await Promise.all(requests)
@@ -130,24 +134,24 @@ async function fetchChunkedQueries(
 
 async function fetchSingleQuery(
   config: NormalizedRelationReaderConfig,
-  options: LoadSubsetOptions,
+  plan: SupabaseQueryPlan,
 ): Promise<any[]> {
   let query = createSelectQuery(config)
-  query = applyLoadSubsetOptions(query, options)
+  query = applyQueryPlan(query, plan)
 
   return resolveRows(query)
 }
 
 async function fetchAllPages(
   config: NormalizedRelationReaderConfig,
-  options: LoadSubsetOptions,
+  plan: SupabaseQueryPlan,
 ): Promise<any[]> {
   const rows: any[] = []
   let offset = 0
 
   while (true) {
     let query = createSelectQuery(config)
-    query = applyLoadSubsetOptions(query, options)
+    query = applyQueryPlan(query, plan)
     query = query.range(offset, offset + config.pageSize - 1)
 
     const page = await resolveRows(query)

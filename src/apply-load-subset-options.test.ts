@@ -1,13 +1,32 @@
-import { describe, it, expect } from 'vitest'
-import { eq, gt, gte, lt, lte, and, or, not, inArray, like, ilike, isNull, isUndefined, IR } from '@tanstack/db'
-import { applyLoadSubsetOptions } from './apply-load-subset-options'
+import { describe, expect, it } from 'vitest'
+import {
+  IR,
+  and,
+  eq,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  isUndefined,
+  like,
+  lt,
+  lte,
+  not,
+  or,
+} from '@tanstack/db'
+import { applyLoadSubsetOptions, applyQueryPlan } from './apply-load-subset-options.ts'
+import {
+  compileLoadSubsetOptions,
+  compilePredicate,
+  findChunkableInPredicate,
+  withInPredicateValues,
+} from './load-subset-query-plan.ts'
+import type { SupabaseQueryPlan } from './load-subset-query-plan.ts'
 
-// Shorthand for creating a PropRef (field reference)
 const ref = (name: string) => new IR.PropRef([name])
-// Multi-segment PropRef for JSON paths: jsonRef('data', 'name') → PropRef(['data', 'name'])
 const jsonRef = (...segments: string[]) => new IR.PropRef(segments)
 
-// Creates a mock Supabase query builder that records chained calls
 function createMockQueryBuilder() {
   const calls: Array<{ method: string; args: any[] }> = []
 
@@ -26,347 +45,259 @@ function createMockQueryBuilder() {
   return { builder, calls }
 }
 
-describe('applyLoadSubsetOptions', () => {
-  describe('where filters', () => {
-    it('applies eq filter', () => {
-      const { builder, calls } = createMockQueryBuilder()
+describe('compileLoadSubsetOptions', () => {
+  it('compiles supported comparison operators into predicate nodes', () => {
+    const cases: Array<{ expression: unknown; operator: string; value: unknown; postgrestValue: string }> = [
+      { expression: eq(ref('age'), 18), operator: 'eq', value: 18, postgrestValue: '18' },
+      { expression: gt(ref('age'), 18), operator: 'gt', value: 18, postgrestValue: '18' },
+      { expression: gte(ref('age'), 18), operator: 'gte', value: 18, postgrestValue: '18' },
+      { expression: lt(ref('age'), 18), operator: 'lt', value: 18, postgrestValue: '18' },
+      { expression: lte(ref('age'), 18), operator: 'lte', value: 18, postgrestValue: '18' },
+      { expression: like(ref('age'), '%18%' as any), operator: 'like', value: '%18%', postgrestValue: '%18%' },
+      { expression: ilike(ref('age'), '%18%' as any), operator: 'ilike', value: '%18%', postgrestValue: '%18%' },
+    ]
 
-      const where = eq(ref('status'), 'ONLINE')
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'eq', args: ['status', 'ONLINE'] })
-    })
-
-    it('applies gt, gte, lt, lte filters', () => {
-      const cases = [
-        { fn: gt, method: 'gt' },
-        { fn: gte, method: 'gte' },
-        { fn: lt, method: 'lt' },
-        { fn: lte, method: 'lte' },
-      ] as const
-
-      for (const { fn, method } of cases) {
-        const { builder, calls } = createMockQueryBuilder()
-        const where = fn(ref('age'), 18)
-        applyLoadSubsetOptions(builder, { where })
-        expect(calls).toContainEqual({ method, args: ['age', 18] })
-      }
-    })
-
-    it('applies in filter', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = inArray(ref('status'), ['ONLINE', 'OFFLINE'] as any)
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'in', args: ['status', ['ONLINE', 'OFFLINE']] })
-    })
-
-    it('applies like and ilike filters', () => {
-      for (const [fn, method] of [[like, 'like'], [ilike, 'ilike']] as const) {
-        const { builder, calls } = createMockQueryBuilder()
-        const where = fn(ref('username'), '%alice%' as any)
-        applyLoadSubsetOptions(builder, { where })
-        expect(calls).toContainEqual({ method, args: ['username', '%alice%'] })
-      }
-    })
-
-    it('applies isUndefined as isNull (no postgres equivalent)', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = isUndefined(ref('deleted_at'))
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'is', args: ['deleted_at', null] })
-    })
-
-    it('applies isNull filter', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = isNull(ref('deleted_at'))
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'is', args: ['deleted_at', null] })
-    })
-
-    it('applies and combinator (multiple chained filters)', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = and(eq(ref('status'), 'ONLINE'), gt(ref('age'), 18))
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'eq', args: ['status', 'ONLINE'] })
-      expect(calls).toContainEqual({ method: 'gt', args: ['age', 18] })
-    })
-
-    it('applies or combinator using supabase .or() syntax', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = or(eq(ref('status'), 'ONLINE'), eq(ref('status'), 'OFFLINE'))
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({
-        method: 'or',
-        args: ['status.eq.ONLINE,status.eq.OFFLINE'],
+    for (const { expression, operator, value, postgrestValue } of cases) {
+      expect(compilePredicate(expression)).toEqual({
+        kind: 'comparison',
+        field: 'age',
+        operator,
+        value,
+        postgrestValue,
       })
+    }
+  })
+
+  it('compiles in, isNull, and isUndefined predicates', () => {
+    expect(compilePredicate(inArray(ref('status'), ['ONLINE', 'AWAY'] as any))).toEqual({
+      kind: 'in',
+      field: 'status',
+      values: ['ONLINE', 'AWAY'],
+      postgrestValues: ['ONLINE', 'AWAY'],
     })
 
-    it('applies not filter', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = not(eq(ref('status'), 'OFFLINE'))
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'not', args: ['status', 'eq', 'OFFLINE'] })
+    expect(compilePredicate(isNull(ref('deleted_at')))).toEqual({
+      kind: 'isNull',
+      field: 'deleted_at',
     })
 
-    it('applies not(isNull(...))', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = not(isNull(ref('deleted_at')))
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'not', args: ['deleted_at', 'is', null] })
+    expect(compilePredicate(isUndefined(ref('archived_at')))).toEqual({
+      kind: 'isNull',
+      field: 'archived_at',
     })
+  })
 
-    it('applies not(inArray(...))', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = not(inArray(ref('status'), ['BANNED', 'DELETED'] as any))
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'not', args: ['status', 'in', '(BANNED,DELETED)'] })
-    })
-
-    it('quotes special chars in not(inArray(...)) values', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = not(inArray(ref('name'), ['a,b', 'c.d'] as any))
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'not', args: ['name', 'in', '("a,b","c.d")'] })
-    })
-
-    it('escapes values with special characters in or() filter strings', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = or(
-        eq(ref('name'), "O'Brien"),
-        eq(ref('name'), 'a,b'),
-        eq(ref('name'), 'x.y'),
-        eq(ref('name'), 'has(parens)'),
-      )
-      applyLoadSubsetOptions(builder, { where })
-
-      // PostgREST requires double-quoting values with special chars
-      expect(calls).toContainEqual({
-        method: 'or',
-        args: [`name.eq."O'Brien",name.eq."a,b",name.eq."x.y",name.eq."has(parens)"`],
-      })
-    })
-
-    it('handles nested expressions: or inside and', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = and(
+  it('compiles nested and, or, and not predicates without applying them', () => {
+    const predicate = compilePredicate(
+      and(
         or(eq(ref('status'), 'ONLINE'), eq(ref('status'), 'AWAY')),
-        gt(ref('age'), 18),
-      )
-      applyLoadSubsetOptions(builder, { where })
+        not(inArray(ref('role'), ['banned', 'deleted'] as any)),
+      ),
+    )
 
-      expect(calls).toContainEqual({
-        method: 'or',
-        args: ['status.eq.ONLINE,status.eq.AWAY'],
-      })
-      expect(calls).toContainEqual({ method: 'gt', args: ['age', 18] })
-    })
-
-    it('handles nested expressions: and inside or', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = or(
-        and(eq(ref('status'), 'ONLINE'), gt(ref('age'), 18)),
-        eq(ref('role'), 'admin'),
-      )
-      applyLoadSubsetOptions(builder, { where })
-
-      // PostgREST or() syntax: each branch is a filter string
-      expect(calls).toContainEqual({
-        method: 'or',
-        args: ['and(status.eq.ONLINE,age.gt.18),role.eq.admin'],
-      })
-    })
-  })
-
-  describe('json column paths', () => {
-    it('converts multi-segment paths to PostgREST arrow notation for query builder', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      // data.name → data->>'name' (text extraction for leaf)
-      const where = eq(jsonRef('data', 'name'), 'alice')
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'eq', args: ['data->>name', 'alice'] })
-    })
-
-    it('converts deeply nested paths to chained arrow notation', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      // data.address.city → data->address->>'city'
-      const where = eq(jsonRef('data', 'address', 'city'), 'NYC')
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'eq', args: ['data->address->>city', 'NYC'] })
-    })
-
-    it('converts multi-segment paths in PostgREST filter strings (or context)', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = or(
-        eq(jsonRef('data', 'role'), 'admin'),
-        eq(ref('status'), 'ONLINE'),
-      )
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({
-        method: 'or',
-        args: ['data->>role.eq.admin,status.eq.ONLINE'],
-      })
-    })
-
-    it('leaves single-segment paths unchanged', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = eq(ref('status'), 'ONLINE')
-      applyLoadSubsetOptions(builder, { where })
-
-      expect(calls).toContainEqual({ method: 'eq', args: ['status', 'ONLINE'] })
+    expect(predicate).toEqual({
+      kind: 'and',
+      predicates: [
+        {
+          kind: 'or',
+          predicates: [
+            {
+              kind: 'comparison',
+              field: 'status',
+              operator: 'eq',
+              value: 'ONLINE',
+              postgrestValue: 'ONLINE',
+            },
+            {
+              kind: 'comparison',
+              field: 'status',
+              operator: 'eq',
+              value: 'AWAY',
+              postgrestValue: 'AWAY',
+            },
+          ],
+        },
+        {
+          kind: 'not',
+          predicate: {
+            kind: 'in',
+            field: 'role',
+            values: ['banned', 'deleted'],
+            postgrestValues: ['banned', 'deleted'],
+          },
+        },
+      ],
     })
   })
 
-  describe('cursor pagination', () => {
-    it('ANDs cursor.whereFrom with the main where clause', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const where = eq(ref('status'), 'ONLINE')
-      const cursor = {
-        whereFrom: gt(ref('id'), 100),
-        whereCurrent: eq(ref('id'), 100),
-      }
-
-      applyLoadSubsetOptions(builder, { where, cursor })
-
-      // Both the main where and cursor.whereFrom should be applied as chained filters
-      expect(calls).toContainEqual({ method: 'eq', args: ['status', 'ONLINE'] })
-      expect(calls).toContainEqual({ method: 'gt', args: ['id', 100] })
+  it('compiles JSON column paths to PostgREST path syntax', () => {
+    expect(compilePredicate(eq(jsonRef('data', 'name'), 'alice'))).toMatchObject({
+      kind: 'comparison',
+      field: 'data->>name',
     })
 
-    it('applies cursor.whereFrom even without a main where clause', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const cursor = {
-        whereFrom: gt(ref('id'), 50),
-        whereCurrent: eq(ref('id'), 50),
-      }
-
-      applyLoadSubsetOptions(builder, { cursor })
-
-      expect(calls).toContainEqual({ method: 'gt', args: ['id', 50] })
+    expect(compilePredicate(eq(jsonRef('data', 'address', 'city'), 'NYC'))).toMatchObject({
+      kind: 'comparison',
+      field: 'data->address->>city',
     })
   })
 
-  describe('no-op', () => {
-    it('returns the query unchanged when options are empty', () => {
-      const { builder, calls } = createMockQueryBuilder()
+  it('quotes PostgREST string values with special characters', () => {
+    const predicate = compilePredicate(inArray(ref('name'), [
+      'a,b',
+      'x.y',
+      'has(parens)',
+      'has space',
+      'quote"mark',
+      'slash\\mark',
+      '',
+    ] as any))
 
-      const result = applyLoadSubsetOptions(builder, {})
-
-      expect(calls).toHaveLength(0)
-      expect(result).toBe(builder)
+    expect(predicate).toMatchObject({
+      kind: 'in',
+      postgrestValues: [
+        '"a,b"',
+        '"x.y"',
+        '"has(parens)"',
+        '"has space"',
+        '"quote\\"mark"',
+        '"slash\\\\mark"',
+        '""',
+      ],
     })
   })
 
-  describe('orderBy', () => {
-    it('applies order by ascending', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const orderBy = [
+  it('represents where, cursor whereFrom, ordering, limit, and range in the compiled plan', () => {
+    const limitedPlan = compileLoadSubsetOptions({
+      where: eq(ref('status'), 'ONLINE'),
+      cursor: {
+        whereFrom: gt(ref('id'), 10),
+        whereCurrent: eq(ref('id'), 10),
+      },
+      orderBy: [
         {
           expression: ref('created_at'),
-          compareOptions: { direction: 'asc' as const, nulls: 'last' as const },
-        },
-      ]
-
-      applyLoadSubsetOptions(builder, { orderBy })
-
-      expect(calls).toContainEqual({
-        method: 'order',
-        args: ['created_at', { ascending: true, nullsFirst: false }],
-      })
-    })
-
-    it('applies order by descending with nulls first', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const orderBy = [
-        {
-          expression: ref('score'),
           compareOptions: { direction: 'desc' as const, nulls: 'first' as const },
         },
-      ]
-
-      applyLoadSubsetOptions(builder, { orderBy })
-
-      expect(calls).toContainEqual({
-        method: 'order',
-        args: ['score', { ascending: false, nullsFirst: true }],
-      })
+      ],
+      limit: 25,
     })
 
-    it('applies multiple orderBy columns in sequence', () => {
-      const { builder, calls } = createMockQueryBuilder()
-
-      const orderBy = [
+    expect(limitedPlan).toEqual({
+      predicates: [
         {
-          expression: ref('status'),
-          compareOptions: { direction: 'asc' as const, nulls: 'last' as const },
+          kind: 'comparison',
+          field: 'status',
+          operator: 'eq',
+          value: 'ONLINE',
+          postgrestValue: 'ONLINE',
         },
         {
-          expression: ref('created_at'),
-          compareOptions: { direction: 'desc' as const, nulls: 'last' as const },
+          kind: 'comparison',
+          field: 'id',
+          operator: 'gt',
+          value: 10,
+          postgrestValue: '10',
         },
-      ]
+      ],
+      orderBy: [{ field: 'created_at', ascending: false, nullsFirst: true }],
+      limit: 25,
+    })
 
-      applyLoadSubsetOptions(builder, { orderBy })
-
-      const orderCalls = calls.filter((c) => c.method === 'order')
-      expect(orderCalls).toHaveLength(2)
-      expect(orderCalls[0]).toEqual({
-        method: 'order',
-        args: ['status', { ascending: true, nullsFirst: false }],
-      })
-      expect(orderCalls[1]).toEqual({
-        method: 'order',
-        args: ['created_at', { ascending: false, nullsFirst: false }],
-      })
+    expect(compileLoadSubsetOptions({ offset: 20, limit: 10 })).toMatchObject({
+      range: { from: 20, to: 29 },
     })
   })
 
-  describe('limit and offset', () => {
-    it('applies limit', () => {
-      const { builder, calls } = createMockQueryBuilder()
+  it('fails unsupported expressions with a useful error', () => {
+    expect(() => compilePredicate(new IR.Func('unknownOp', [ref('id'), new IR.Value(1)]))).toThrow(
+      /Unsupported load subset expression.*Supported functions/,
+    )
+  })
+})
 
-      applyLoadSubsetOptions(builder, { limit: 10 })
-
-      expect(calls).toContainEqual({ method: 'limit', args: [10] })
+describe('compiled in predicate chunking', () => {
+  it('finds and replaces in predicates on the compiled representation', () => {
+    const plan = compileLoadSubsetOptions({
+      where: and(eq(ref('status'), 'ONLINE'), inArray(ref('id'), [1, 2, 3] as any)),
+      limit: 10,
     })
 
-    it('applies offset via range', () => {
-      const { builder, calls } = createMockQueryBuilder()
+    expect(findChunkableInPredicate(plan)).toEqual({ field: 'id', values: [1, 2, 3] })
 
-      applyLoadSubsetOptions(builder, { offset: 20, limit: 10 })
-
-      expect(calls).toContainEqual({ method: 'range', args: [20, 29] })
+    const chunkedPlan = withInPredicateValues(plan, 'id', [2, 3])
+    expect(chunkedPlan).toEqual({
+      ...plan,
+      predicates: [
+        {
+          kind: 'and',
+          predicates: [
+            {
+              kind: 'comparison',
+              field: 'status',
+              operator: 'eq',
+              value: 'ONLINE',
+              postgrestValue: 'ONLINE',
+            },
+            {
+              kind: 'in',
+              field: 'id',
+              values: [2, 3],
+              postgrestValues: ['2', '3'],
+            },
+          ],
+        },
+      ],
     })
+  })
+})
+
+describe('applyQueryPlan', () => {
+  it('applies a compiled plan through a small Supabase builder adapter', () => {
+    const { builder, calls } = createMockQueryBuilder()
+
+    applyQueryPlan(builder, compileLoadSubsetOptions({
+      where: and(
+        or(eq(ref('status'), 'ONLINE'), eq(ref('status'), 'AWAY')),
+        not(isNull(ref('deleted_at'))),
+      ),
+      orderBy: [
+        {
+          expression: ref('created_at'),
+          compareOptions: { direction: 'asc' as const, nulls: 'last' as const },
+        },
+      ],
+      offset: 20,
+      limit: 10,
+    }))
+
+    expect(calls).toEqual([
+      { method: 'or', args: ['status.eq.ONLINE,status.eq.AWAY'] },
+      { method: 'not', args: ['deleted_at', 'is', null] },
+      { method: 'order', args: ['created_at', { ascending: true, nullsFirst: false }] },
+      { method: 'range', args: [20, 29] },
+    ])
+  })
+})
+
+describe('applyLoadSubsetOptions', () => {
+  it('keeps the existing compile-and-apply entry point', () => {
+    const { builder, calls } = createMockQueryBuilder()
+    const plan: SupabaseQueryPlan = compileLoadSubsetOptions({
+      where: or(eq(ref('name'), "O'Brien"), eq(ref('name'), 'a,b')),
+      limit: 1,
+    })
+
+    const result = applyLoadSubsetOptions(builder, {
+      where: or(eq(ref('name'), "O'Brien"), eq(ref('name'), 'a,b')),
+      limit: 1,
+    })
+
+    expect(result).toBe(builder)
+    expect(plan.predicates).toHaveLength(1)
+    expect(calls).toEqual([
+      { method: 'or', args: [`name.eq."O'Brien",name.eq."a,b"`] },
+      { method: 'limit', args: [1] },
+    ])
   })
 })

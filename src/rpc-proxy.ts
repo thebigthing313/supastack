@@ -1,3 +1,4 @@
+import { createLazyRegistry } from './lazy-registry.ts'
 import { validateRpcArgs, validateRpcReturns } from './schema-boundary.ts'
 import type { RpcSchemas } from './schema-boundary.ts'
 
@@ -20,32 +21,21 @@ export type RpcQueryOptions<TReturns = unknown> = {
   gcTime?: number
 }
 
-const PROXY_GUARD_KEYS = new Set(['then', 'toJSON', 'valueOf', '$$typeof', 'constructor', 'prototype'])
-
 const RPC_QUERY_OPTION_KEYS = ['staleTime', 'retry', 'gcTime'] as const
 
 export function createRpcProxy(
   supabase: SupabaseClientLike,
   rpcConfigs?: Record<string, RpcConfig>,
 ): any {
-  return new Proxy({} as any, {
-    get(_target, fnName: string | symbol) {
-      if (typeof fnName !== 'string' || PROXY_GUARD_KEYS.has(fnName)) return undefined
-
-      const fnConfig = rpcConfigs?.[fnName]
-
+  return createLazyRegistry({
+    mode: 'dynamic',
+    entries: rpcConfigs,
+    create: (fnName, fnConfig) => {
       return (args: any, callOpts?: Partial<Pick<RpcConfig, 'staleTime' | 'retry' | 'gcTime'>>) => {
-        // Merge query options: config-level defaults, then per-call overrides
         const queryOpts: Record<string, unknown> = {}
-        if (fnConfig) {
-          for (const key of RPC_QUERY_OPTION_KEYS) {
-            if (fnConfig[key] !== undefined) queryOpts[key] = fnConfig[key]
-          }
-        }
-        if (callOpts) {
-          for (const key of RPC_QUERY_OPTION_KEYS) {
-            if (callOpts[key] !== undefined) queryOpts[key] = callOpts[key]
-          }
+        for (const key of RPC_QUERY_OPTION_KEYS) {
+          if (fnConfig?.[key] !== undefined) queryOpts[key] = fnConfig[key]
+          if (callOpts?.[key] !== undefined) queryOpts[key] = callOpts[key]
         }
 
         return {

@@ -4,6 +4,7 @@ import type { Collection } from '@tanstack/db'
 import type { QueryCollectionUtils } from '@tanstack/query-db-collection'
 import { createRelationCollection } from './relation-collection-factory.ts'
 import type { SupabaseClientLike, TableConfig, ViewConfig } from './relation-collection-factory.ts'
+import { createLazyRegistry } from './lazy-registry.ts'
 import { createRpcProxy } from './rpc-proxy.ts'
 import type { RpcConfig } from './rpc-proxy.ts'
 export { applyLoadSubsetOptions } from './apply-load-subset-options.ts'
@@ -111,44 +112,6 @@ interface SupabaseCollectionsResult<DB, TConfig extends SupabaseCollectionsConfi
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-const PROXY_GUARD_KEYS = new Set(['then', 'toJSON', 'valueOf', '$$typeof', 'constructor', 'prototype'])
-
-function createCachedProxy(
-  cache: Map<string, any>,
-  configMap: Record<string, any> | undefined,
-  factory: (name: string, config: any) => any,
-) {
-  const proxy = new Proxy({} as any, {
-    get(_target, name: string | symbol) {
-      if (typeof name !== 'string' || PROXY_GUARD_KEYS.has(name)) return undefined
-      if (cache.has(name)) return cache.get(name)
-
-      const itemConfig = configMap?.[name]
-      if (!itemConfig) return undefined
-
-      const item = factory(name, itemConfig)
-      cache.set(name, item)
-      return item
-    },
-    ownKeys() {
-      return Object.keys(configMap ?? {})
-    },
-    getOwnPropertyDescriptor(_target, name): PropertyDescriptor | undefined {
-      if (typeof name === 'string' && configMap && name in configMap) {
-        if (!cache.has(name)) {
-          cache.set(name, factory(name, configMap[name]))
-        }
-        return { configurable: true, enumerable: true, value: cache.get(name) }
-      }
-    },
-  })
-  return proxy
-}
-
-// ---------------------------------------------------------------------------
 // Main function
 // ---------------------------------------------------------------------------
 
@@ -159,10 +122,9 @@ export function createSupabaseCollections<DB, const TConfig extends SupabaseColl
 ): SupabaseCollectionsResult<DB, TConfig> {
   const { wrapOptions } = config
 
-  const tables = createCachedProxy(
-    new Map(),
-    config.tables as any,
-    (name, tableConfig) => createRelationCollection({
+  const tables = createLazyRegistry({
+    entries: config.tables as Record<string, any> | undefined,
+    create: (name, tableConfig) => createRelationCollection({
       kind: 'table',
       relationName: name,
       config: tableConfig,
@@ -170,12 +132,11 @@ export function createSupabaseCollections<DB, const TConfig extends SupabaseColl
       queryClient,
       wrapOptions,
     }),
-  )
+  })
 
-  const views = createCachedProxy(
-    new Map(),
-    config.views as any,
-    (name, viewConfig) => createRelationCollection({
+  const views = createLazyRegistry({
+    entries: config.views as Record<string, any> | undefined,
+    create: (name, viewConfig) => createRelationCollection({
       kind: 'view',
       relationName: name,
       config: viewConfig,
@@ -183,7 +144,7 @@ export function createSupabaseCollections<DB, const TConfig extends SupabaseColl
       queryClient,
       wrapOptions,
     }),
-  )
+  })
 
   const rpc = createRpcProxy(supabase, config.rpcs as Record<string, RpcConfig> | undefined)
 

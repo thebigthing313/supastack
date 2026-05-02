@@ -1,8 +1,5 @@
-import { applyLoadSubsetOptions, findInArrayExpression, replaceInArrayExpression } from './apply-load-subset-options.ts'
+import { createRelationReader } from './relation-reader.ts'
 import type { LoadSubsetOptions } from '@tanstack/db'
-
-const DEFAULT_PAGE_SIZE = 1000
-const DEFAULT_IN_ARRAY_CHUNK_SIZE = 200
 
 export interface QueryPipelineConfig {
   supabase: any
@@ -21,7 +18,8 @@ export type QueryFn = (context: { meta?: { loadSubsetOptions?: LoadSubsetOptions
  * pagination, in-array chunking, and on-demand validation.
  */
 export function createQueryFn(config: QueryPipelineConfig): QueryFn {
-  return (context) => executeQuery(config, context.meta?.loadSubsetOptions)
+  const reader = createRelationReader(toRelationReaderConfig(config))
+  return (context) => reader.read(context.meta?.loadSubsetOptions)
 }
 
 /**
@@ -32,113 +30,11 @@ export async function executeQuery(
   config: QueryPipelineConfig,
   loadSubsetOptions?: LoadSubsetOptions,
 ): Promise<any[]> {
-  const {
-    supabase,
-    tableName,
-    syncMode,
-    select: selectColumns = '*',
-    pageSize = DEFAULT_PAGE_SIZE,
-    inArrayChunkSize = DEFAULT_IN_ARRAY_CHUNK_SIZE,
-  } = config
-
-  if (syncMode === 'on-demand') {
-    if (!loadSubsetOptions?.where && !loadSubsetOptions?.limit && !loadSubsetOptions?.cursor) {
-      throw new Error(
-        `On-demand collection "${tableName}" requires a where clause, limit, or cursor. ` +
-        `Predicateless queries on on-demand collections would fetch the entire table.`,
-      )
-    }
-
-    // Check if the where tree contains an in() with a large array.
-    // If so, chunk into multiple parallel HTTP requests to avoid URL length limits.
-    const inExpr = loadSubsetOptions.where
-      ? findInArrayExpression(loadSubsetOptions.where)
-      : null
-
-    if (inExpr && inExpr.items.length > inArrayChunkSize) {
-      const chunks = chunk(inExpr.items, inArrayChunkSize)
-      const results = await Promise.all(
-        chunks.map((itemChunk) => {
-          const chunkedWhere = replaceInArrayExpression(
-            loadSubsetOptions.where,
-            inExpr.field,
-            itemChunk,
-          )
-          return fetchSingleQuery(supabase, tableName, selectColumns, { ...loadSubsetOptions, where: chunkedWhere })
-        }),
-      )
-      return results.flat()
-    }
-
-    // If the caller specifies limit/offset, do a single fetch (no auto-pagination).
-    if (loadSubsetOptions.limit != null || loadSubsetOptions.offset != null) {
-      return fetchSingleQuery(supabase, tableName, selectColumns, loadSubsetOptions)
-    }
-
-    return fetchAllPages(supabase, tableName, selectColumns, loadSubsetOptions, pageSize)
-  }
-
-  // Eager mode: fetch all rows with auto-pagination
-  return fetchAllPages(supabase, tableName, selectColumns, {}, pageSize)
+  const reader = createRelationReader(toRelationReaderConfig(config))
+  return reader.read(loadSubsetOptions)
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-function chunk<T>(arr: T[], size: number): T[][] {
-  const chunks: T[][] = []
-  for (let i = 0; i < arr.length; i += size) {
-    chunks.push(arr.slice(i, i + size))
-  }
-  return chunks
-}
-
-/**
- * Fetches a single query from Supabase with loadSubsetOptions applied.
- */
-async function fetchSingleQuery(
-  supabase: any,
-  tableName: string,
-  selectColumns: string,
-  loadSubsetOptions: LoadSubsetOptions,
-): Promise<any[]> {
-  let query = supabase.from(tableName).select(selectColumns)
-  query = applyLoadSubsetOptions(query, loadSubsetOptions)
-  const { data, error } = await query
-  if (error) throw error
-  return data as any[]
-}
-
-/**
- * Fetches all rows by paginating via .range() until fewer than pageSize rows are returned.
- */
-async function fetchAllPages(
-  supabase: any,
-  tableName: string,
-  selectColumns: string,
-  loadSubsetOptions: LoadSubsetOptions,
-  pageSize: number,
-): Promise<any[]> {
-  const allRows: any[] = []
-  let offset = 0
-
-  const hasOptions = loadSubsetOptions.where || loadSubsetOptions.orderBy || loadSubsetOptions.cursor || loadSubsetOptions.limit != null || loadSubsetOptions.offset != null
-
-  while (true) {
-    let query = supabase.from(tableName).select(selectColumns)
-    if (hasOptions) query = applyLoadSubsetOptions(query, loadSubsetOptions)
-    query = query.range(offset, offset + pageSize - 1)
-
-    const { data, error } = await query
-    if (error) throw error
-
-    const rows = data as any[]
-    for (let i = 0; i < rows.length; i++) allRows.push(rows[i])
-
-    if (rows.length < pageSize) break
-    offset += pageSize
-  }
-
-  return allRows
+function toRelationReaderConfig(config: QueryPipelineConfig) {
+  const { tableName, ...rest } = config
+  return { ...rest, relationName: tableName }
 }

@@ -83,6 +83,7 @@ describe('on-demand queryKey (issue #5)', () => {
     const fullKey = queryKeyFn({
       where: { id: 1 },
       orderBy: [{ column: 'name', direction: 'asc' }],
+      cursor: { whereFrom: { id: { gt: 1 } } },
       limit: 100,
       offset: 0,
     })
@@ -93,6 +94,7 @@ describe('on-demand queryKey (issue #5)', () => {
     expect(fullKey[1]).toEqual({
       where: { id: 1 },
       orderBy: [{ column: 'name', direction: 'asc' }],
+      cursor: { whereFrom: { id: { gt: 1 } } },
       limit: 100,
       offset: 0,
     })
@@ -116,6 +118,19 @@ describe('on-demand queryKey (issue #5)', () => {
     // Only where/orderBy/limit/offset are picked — no extra fields leak through
     expect(key[1]).toEqual({ where: { id: 1 }, limit: 10 })
     expect(key[1]).not.toHaveProperty('somethingCircular')
+  })
+
+  it('includes cursor params for paginated on-demand reads', () => {
+    const db = createSupabaseCollections<Database>(supabase, queryClient, {
+      tables: { users: { keyColumn: 'id', syncMode: 'on-demand' } },
+    })
+    db.tables.users
+
+    const queryKeyFn = queryCollectionOptionsSpy.mock.calls[0][0].queryKey
+    const cursor = { whereFrom: { id: { gt: 10 } }, whereCurrent: { id: 10 } }
+    const key = queryKeyFn({ cursor })
+
+    expect(key).toEqual(['users', { cursor }])
   })
 
   it('key is JSON-serializable', () => {

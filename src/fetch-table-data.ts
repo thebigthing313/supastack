@@ -1,5 +1,5 @@
-// Backward-compatible wrapper around the new query pipeline.
-// New code should import from './query-pipeline.ts' instead.
+// Backward-compatible wrapper around the relation reader.
+// New code should import createRelationReader or executeQuery instead.
 import { executeQuery } from './query-pipeline.ts'
 import type { LoadSubsetOptions } from '@tanstack/db'
 

@@ -326,7 +326,10 @@ import {
   createSupabaseCollections,
   defineConfig,
 
-  // Query pipeline — build custom queryFn or fetch directly
+  // Relation reader — preferred read boundary for custom integrations
+  createRelationReader,
+
+  // Query pipeline — compatibility helpers for custom queryFns
   createQueryFn,
   executeQuery,
 
@@ -356,6 +359,9 @@ import type {
   RpcConfig,
   MutationHandlerConfig,
   MutationHandlers,
+  RelationReader,
+  RelationReaderConfig,
+  SupabaseRelationClient,
 } from 'supastack'
 ```
 

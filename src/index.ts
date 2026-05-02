@@ -17,10 +17,12 @@ import type { RpcConfig } from './rpc-proxy.ts'
 export { applyLoadSubsetOptions } from './apply-load-subset-options.ts'
 export { fetchTableData } from './fetch-table-data.ts'
 export { createQueryFn, executeQuery } from './query-pipeline.ts'
+export { createRelationReader } from './relation-reader.ts'
 export { createMutationHandlers } from './mutation-handlers.ts'
 export type { MutationHandlerConfig, MutationHandlers } from './mutation-handlers.ts'
 export { createRpcProxy } from './rpc-proxy.ts'
 export type { RpcConfig } from './rpc-proxy.ts'
+export type { RelationReader, RelationReaderConfig, SupabaseRelationClient } from './relation-reader.ts'
 
 // ---------------------------------------------------------------------------
 // Type-level utilities for extracting table/view/function info from Database
@@ -197,6 +199,7 @@ function buildBaseCollectionOptions(
       const key: Record<string, unknown> = {}
       if (opts.where !== undefined) key.where = opts.where
       if (opts.orderBy !== undefined) key.orderBy = opts.orderBy
+      if (opts.cursor !== undefined) key.cursor = opts.cursor
       if (opts.limit !== undefined) key.limit = opts.limit
       if (opts.offset !== undefined) key.offset = opts.offset
       return Object.keys(key).length > 0 ? [name, key] : [name]

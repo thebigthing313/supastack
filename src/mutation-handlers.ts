@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { TableSchemas } from './index.ts'
+import type { TableSchemas } from './relation-collection-factory.ts'
 
 type CrudOperation = 'insert' | 'update' | 'delete'
 

@@ -1,5 +1,5 @@
-import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { TableSchemas } from './relation-collection-factory.ts'
+import { validateInsertPayload, validateUpdatePayload } from './schema-boundary.ts'
+import type { TableSchemas } from './schema-boundary.ts'
 
 type CrudOperation = 'insert' | 'update' | 'delete'
 
@@ -23,12 +23,6 @@ export interface MutationHandlers {
 
 const ALL_OPERATIONS: CrudOperation[] = ['insert', 'update', 'delete']
 
-async function validateWithSchema(schema: StandardSchemaV1, data: unknown): Promise<unknown> {
-  const result = await schema['~standard'].validate(data)
-  if (result.issues) throw new Error(`Validation failed: ${JSON.stringify(result.issues)}`)
-  return result.value
-}
-
 async function withRefetch(col: any, fn: () => Promise<void>): Promise<void> {
   try {
     await fn()
@@ -48,11 +42,7 @@ export function createMutationHandlers(config: MutationHandlerConfig): MutationH
       await withRefetch(col, async () => {
         const items = []
         for (const mutation of transaction.mutations) {
-          let item = mutation.modified
-          if (schemas?.insert) {
-            item = await validateWithSchema(schemas.insert, item)
-          }
-          items.push(item)
+          items.push(await validateInsertPayload(schemas?.insert, mutation.modified))
         }
         const payload = items.length === 1 ? items[0] : items
         const { error } = await table().insert(payload)
@@ -66,10 +56,7 @@ export function createMutationHandlers(config: MutationHandlerConfig): MutationH
       await withRefetch(col, async () => {
         for (const mutation of transaction.mutations) {
           const { key, changes } = mutation
-          let updateData = changes
-          if (schemas?.update) {
-            updateData = await validateWithSchema(schemas.update, changes)
-          }
+          const updateData = await validateUpdatePayload(schemas?.update, changes)
           const { error } = await table().update(updateData).eq(keyColumn, key)
           if (error) throw error
         }

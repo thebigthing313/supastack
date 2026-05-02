@@ -1,14 +1,12 @@
-import type { StandardSchemaV1 } from '@standard-schema/spec'
+import { validateRpcArgs, validateRpcReturns } from './schema-boundary.ts'
+import type { RpcSchemas } from './schema-boundary.ts'
 
 interface SupabaseClientLike {
   rpc(fn: string, args?: any): any
 }
 
 export interface RpcConfig {
-  schemas?: {
-    args?: StandardSchemaV1
-    returns?: StandardSchemaV1
-  }
+  schemas?: RpcSchemas
   staleTime?: number
   retry?: number | boolean
   gcTime?: number
@@ -25,12 +23,6 @@ export type RpcQueryOptions<TReturns = unknown> = {
 const PROXY_GUARD_KEYS = new Set(['then', 'toJSON', 'valueOf', '$$typeof', 'constructor', 'prototype'])
 
 const RPC_QUERY_OPTION_KEYS = ['staleTime', 'retry', 'gcTime'] as const
-
-async function validateWithSchema(schema: StandardSchemaV1, data: unknown): Promise<unknown> {
-  const result = await schema['~standard'].validate(data)
-  if (result.issues) throw new Error(`Validation failed: ${JSON.stringify(result.issues)}`)
-  return result.value
-}
 
 export function createRpcProxy(
   supabase: SupabaseClientLike,
@@ -59,18 +51,12 @@ export function createRpcProxy(
         return {
           queryKey: ['rpc', fnName, args] as const,
           queryFn: async () => {
-            let rpcArgs = args
-            if (fnConfig?.schemas?.args) {
-              rpcArgs = await validateWithSchema(fnConfig.schemas.args, args)
-            }
+            const rpcArgs = await validateRpcArgs(fnConfig?.schemas?.args, args)
 
             const { data, error } = await supabase.rpc(fnName, rpcArgs)
             if (error) throw error
 
-            if (fnConfig?.schemas?.returns) {
-              return await validateWithSchema(fnConfig.schemas.returns, data)
-            }
-            return data
+            return validateRpcReturns(fnConfig?.schemas?.returns, data)
           },
           ...queryOpts,
         } as RpcQueryOptions

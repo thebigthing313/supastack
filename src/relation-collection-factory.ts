@@ -1,30 +1,19 @@
 import { createCollection as createTanStackCollection } from '@tanstack/db'
 import { queryCollectionOptions as createTanStackQueryCollectionOptions } from '@tanstack/query-db-collection'
 import type { QueryClient } from '@tanstack/query-core'
-import type { StandardSchemaV1 } from '@standard-schema/spec'
 import { createQueryFn } from './query-pipeline.ts'
 import type { QueryFn, QueryPipelineConfig } from './query-pipeline.ts'
 import { createMutationHandlers } from './mutation-handlers.ts'
 import type { MutationHandlerConfig, MutationHandlers } from './mutation-handlers.ts'
+import { attachRowSchema } from './schema-boundary.ts'
+import type { TableSchemas, ViewSchemas } from './schema-boundary.ts'
+export type { TableSchemas, ViewSchemas } from './schema-boundary.ts'
 
 // Structural type instead of SupabaseClient class -- avoids version mismatch
 // issues with protected members when consumers use a different supabase-js version.
 export interface SupabaseClientLike {
   from(relationName: string): any
   rpc(fn: string, args?: any): any
-}
-
-export interface TableSchemas {
-  /** Schema to validate/transform row data fetched from Supabase. */
-  row?: StandardSchemaV1
-  /** Schema to validate/transform data before inserting. Receives the full row. */
-  insert?: StandardSchemaV1
-  /**
-   * Schema to validate/transform data before updating.
-   * Receives only the changed fields (partial), not the full row.
-   * All fields in this schema should be optional.
-   */
-  update?: StandardSchemaV1
 }
 
 export interface QueryOptions {
@@ -61,7 +50,7 @@ export interface TableConfig<TRow extends Record<string, unknown>> extends BaseC
 }
 
 export interface ViewConfig<TRow extends Record<string, unknown>> extends BaseCollectionConfig<TRow> {
-  schemas?: { row?: StandardSchemaV1 }
+  schemas?: ViewSchemas
 }
 
 type RelationCollectionKind = 'table' | 'view'
@@ -154,9 +143,7 @@ function addRowSchema<TRow extends Record<string, unknown>>(
   options: Record<string, any>,
   config: RelationConfig<TRow>,
 ): void {
-  if (config.schemas?.row) {
-    options.schema = config.schemas.row
-  }
+  attachRowSchema(options, config.schemas?.row)
 }
 
 function addMutableRelationOptions<TRow extends Record<string, unknown>>(

@@ -1,7 +1,30 @@
 import { describe, it, expectTypeOf } from 'vitest'
 import { QueryClient } from '@tanstack/query-core'
+import type { LoadSubsetOptions } from '@tanstack/db'
 import { z } from 'zod'
-import { createSupabaseCollections, defineConfig } from './index'
+import {
+  applyLoadSubsetOptions,
+  createMutationHandlers,
+  createQueryFn,
+  createRelationReader,
+  createRpcProxy,
+  createSupabaseCollections,
+  defineConfig,
+  executeQuery,
+  fetchTableData,
+} from './index'
+import type {
+  FetchTableDataOptions,
+  MutationHandlerConfig,
+  MutationHandlers,
+  QueryFn,
+  QueryPipelineConfig,
+  RelationReader,
+  RelationReaderConfig,
+  RpcConfig,
+  RpcQueryOptions,
+  SupabaseRelationClient,
+} from './index'
 import type { Database } from './test-utils/database.types'
 
 const supabase = {} as any
@@ -119,6 +142,68 @@ describe('type safety', () => {
 
       expectTypeOf(opts1).not.toBeAny()
       expectTypeOf(opts2).not.toBeAny()
+    })
+  })
+
+  describe('advanced public API boundary', () => {
+    it('exports read boundary types for custom integrations', () => {
+      const relationClient = {
+        from: (_relationName: string) => ({
+          select: (_columns: string) => ({}),
+        }),
+      } satisfies SupabaseRelationClient
+
+      const readerConfig: RelationReaderConfig = {
+        supabase: relationClient,
+        relationName: 'users',
+        syncMode: 'on-demand',
+        select: 'id,username',
+        pageSize: 50,
+        inArrayChunkSize: 10,
+      }
+      const reader: RelationReader = createRelationReader(readerConfig)
+      expectTypeOf(reader.read).parameter(0).toEqualTypeOf<LoadSubsetOptions | undefined>()
+      expectTypeOf(reader.read).returns.resolves.toEqualTypeOf<any[]>()
+
+      const queryConfig: QueryPipelineConfig = {
+        supabase: relationClient,
+        tableName: 'users',
+        syncMode: 'eager',
+      }
+      const queryFn: QueryFn = createQueryFn(queryConfig)
+      expectTypeOf(queryFn).returns.resolves.toEqualTypeOf<any[]>()
+      expectTypeOf(executeQuery(queryConfig)).resolves.toEqualTypeOf<any[]>()
+
+      const fetchOptions: FetchTableDataOptions = {
+        ...queryConfig,
+        loadSubsetOptions: {} as LoadSubsetOptions,
+      }
+      expectTypeOf(fetchTableData(fetchOptions)).resolves.toEqualTypeOf<any[]>()
+      expectTypeOf(applyLoadSubsetOptions).parameter(1).toEqualTypeOf<LoadSubsetOptions>()
+    })
+
+    it('exports mutation and RPC boundary types for custom integrations', () => {
+      const mutationConfig: MutationHandlerConfig = {
+        tableName: 'users',
+        keyColumn: 'id',
+        supabase: { from: (_tableName: string) => ({}) },
+        operations: ['insert', 'update'],
+      }
+      const handlers: MutationHandlers = createMutationHandlers(mutationConfig)
+      expectTypeOf(handlers).toEqualTypeOf<MutationHandlers>()
+
+      const rpcConfig: RpcConfig = {
+        staleTime: 1_000,
+        retry: false,
+        gcTime: 5_000,
+      }
+      createRpcProxy({ rpc: (_fn: string, _args?: any) => ({}) }, { search_users: rpcConfig })
+
+      const rpcOptions = {
+        queryKey: ['rpc', 'search_users', { query: 'a' }] as const,
+        queryFn: async () => [{ id: 1 }],
+      } satisfies RpcQueryOptions<Array<{ id: number }>>
+      expectTypeOf(rpcOptions.queryFn).returns.resolves.toEqualTypeOf<Array<{ id: number }>>()
     })
   })
 })

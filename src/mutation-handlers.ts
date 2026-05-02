@@ -12,6 +12,7 @@ export interface MutationHandlerConfig {
   keyColumn: string
   schemas?: TableSchemas
   supabase: SupabaseClientLike
+  /** Mutation operations to attach. Defaults to insert, update, and delete. */
   operations?: CrudOperation[]
 }
 
@@ -31,6 +32,13 @@ async function withRefetch(col: any, fn: () => Promise<void>): Promise<void> {
   }
 }
 
+/**
+ * Builds TanStack DB mutation callbacks for custom table collections.
+ *
+ * This extension point owns Supabase insert/update/delete side effects and
+ * optional schema validation. It intentionally does not create collections,
+ * query options, or read behavior.
+ */
 export function createMutationHandlers(config: MutationHandlerConfig): MutationHandlers {
   const { tableName, keyColumn, schemas, supabase, operations = ALL_OPERATIONS } = config
   const enabled = new Set(operations)

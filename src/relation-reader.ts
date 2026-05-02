@@ -40,6 +40,13 @@ interface NormalizedRelationReaderConfig {
   inArrayChunkSize: number
 }
 
+/**
+ * Preferred advanced read boundary for custom table or view integrations.
+ *
+ * The reader owns Supabase read execution, auto-pagination, large IN predicate
+ * chunking, and on-demand safety checks. It intentionally exposes only the
+ * `read` method, keeping query-plan internals private.
+ */
 export function createRelationReader(config: RelationReaderConfig): RelationReader {
   const normalizedConfig = normalizeRelationReaderConfig(config)
 

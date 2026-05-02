@@ -1,5 +1,20 @@
 # supastack
 
+## 1.1.0
+
+### Minor Changes
+
+- Add `createRelationReader` as the preferred advanced read boundary for custom table and view integrations, with eager/on-demand reads, auto-pagination, IN predicate chunking, and on-demand safeguards behind one small interface (#6).
+- Add and document advanced API boundary types including `RelationReader`, `RelationReaderConfig`, `SupabaseRelationClient`, `QueryFn`, `QueryPipelineConfig`, and `FetchTableDataOptions` (#11).
+
+### Patch Changes
+
+- Deepen collection creation around a relation factory so table and view assembly share one internal path for query options, row schemas, mutation wiring, and TanStack collection creation (#7).
+- Compile TanStack DB load-subset options through a query-plan layer before applying them to Supabase builders, keeping `applyLoadSubsetOptions` as the low-level compatibility boundary (#8).
+- Consolidate Standard Schema validation behavior for row schemas, table mutations, and RPC args/returns (#9).
+- Extract shared lazy registry behavior for table and view collection proxies while preserving spread, enumeration, guard-key, and caching semantics (#10).
+- Document the advanced public API boundary and retain legacy read helpers as compatibility wrappers for the current major version (#11).
+
 ## 1.0.3
 
 ### Patch Changes

@@ -318,7 +318,22 @@ const result = await db.rpc.search_todos({ query: 'hello' }).queryFn()
 
 ## Advanced exports
 
-For building custom integrations on top of supastack:
+For building custom integrations on top of supastack, prefer the smallest
+stable boundary that owns the behavior you need:
+
+| Export | Boundary | Notes |
+| --- | --- | --- |
+| `createRelationReader` | Preferred read boundary | Executes Supabase reads for tables or views, including pagination, IN chunking, and on-demand safeguards. It does not expose query-plan internals. |
+| `executeQuery` | One-shot read helper | Runs the same reader behavior for callers that do not need to keep a reader instance. |
+| `createMutationHandlers` | Table mutation boundary | Builds TanStack DB mutation callbacks for insert/update/delete and schema validation. It does not create collections or read data. |
+| `createRpcProxy` | RPC query-options boundary | Builds lazy RPC query option factories. It does not execute through a QueryClient. |
+| `applyLoadSubsetOptions` | Low-level expression translation | Applies TanStack DB filters/order/windowing to a Supabase builder. It does not execute, paginate, chunk large IN predicates, or enforce on-demand guards. |
+| `createQueryFn` | Compatibility adapter | Adapts the relation reader to a TanStack query function shape. Use only when you specifically need that queryFn boundary. |
+| `fetchTableData` | Deprecated compatibility wrapper | Retained for the current major version. Use `executeQuery` or `createRelationReader` for new code. |
+
+The current major version keeps the existing advanced exports available. Legacy
+helpers are compatibility wrappers so internals can keep moving behind the
+stable boundaries.
 
 ```ts
 import {
@@ -357,6 +372,9 @@ import type {
   SupabaseCollectionsConfig,
   RpcQueryOptions,
   RpcConfig,
+  QueryFn,
+  QueryPipelineConfig,
+  FetchTableDataOptions,
   MutationHandlerConfig,
   MutationHandlers,
   RelationReader,

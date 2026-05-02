@@ -80,6 +80,15 @@ function toPostgrestString(node: SupabasePredicate): string {
   }
 }
 
+/**
+ * Applies TanStack DB load-subset filters, ordering, and windowing to an
+ * existing Supabase query builder.
+ *
+ * This is a low-level expression translation boundary. It does not execute the
+ * query, paginate results, chunk large IN predicates, or enforce on-demand
+ * safeguards. Use `createRelationReader` or `executeQuery` for full read
+ * behavior.
+ */
 export function applyLoadSubsetOptions(
   query: SupabaseQueryBuilder,
   options: LoadSubsetOptions,

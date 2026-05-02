@@ -23,6 +23,12 @@ export type RpcQueryOptions<TReturns = unknown> = {
 
 const RPC_QUERY_OPTION_KEYS = ['staleTime', 'retry', 'gcTime'] as const
 
+/**
+ * Builds a lazy RPC query-options proxy for custom TanStack Query integrations.
+ *
+ * The proxy owns RPC argument/return validation and query option construction.
+ * It does not execute through a QueryClient or create collections.
+ */
 export function createRpcProxy(
   supabase: SupabaseClientLike,
   rpcConfigs?: Record<string, RpcConfig>,
